@@ -1,8 +1,23 @@
-import type { FastifyInstance } from 'fastify'
-
+import { FastifyInstance } from "fastify";
+import { navigationRouteSchema } from "../schemas/navigation";
+import type {LocationDTO} from "../../../types/location"
 export async function busRoutes(fastify: FastifyInstance) {
-  fastify.get('/test', async () => {
-    const result = await fastify.pg.query('SELECT 1 + 1 AS result')
-    return result.rows[0]
-  })
+  fastify.post(
+    "/navigation/route",
+    {
+      schema: navigationRouteSchema,
+    },
+    async (request, reply) => {
+      const { from, to } = request.body as {
+        from:LocationDTO;
+        to:LocationDTO ;
+      };
+
+      return {
+        from,
+        to,
+        message: "Routing not implemented yet",
+      };
+    },
+  );
 }
