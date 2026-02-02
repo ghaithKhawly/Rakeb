@@ -17,4 +17,14 @@ export const navigationRouteSchema = {
       to: locationSchema,
     },
   },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        from: locationSchema,
+        to: locationSchema,
+      },
+    },
+  },
 };
