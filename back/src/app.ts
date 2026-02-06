@@ -1,6 +1,6 @@
-import Fastify from "fastify";
+import Fastify, { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import postgresPlugin from "./plugins/postgres";
-import jwtPlugin from "./plugins/jwt";  // JWT auth system
+import jwtPlugin from "./plugins/jwt";  
 import { setupDatabase } from "./db/setup";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
@@ -11,6 +11,22 @@ export const app = Fastify({
 });
 
 export async function buildApp() {
+  app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
+    console.log("errs", error);
+    if (error.validation) {
+      const validationErrors = error.validation.map(err => ({
+        field: err.instancePath.replace('/', ''), 
+        message: err.message
+      }));
+      console.log("valerrs", validationErrors[0].message);
+      return reply.status(400).send({
+        error: `Validation Error ${validationErrors[0].message}`,
+        details: validationErrors[0].message
+      });
+    }
+
+    reply.send(error);
+  });
   await app.register(postgresPlugin);
   
   await app.register(jwtPlugin);
