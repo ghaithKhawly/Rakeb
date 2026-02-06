@@ -1,15 +1,21 @@
 import Fastify from "fastify";
 import postgresPlugin from "./plugins/postgres";
-import { routes } from "./routes";
+import jwtPlugin from "./plugins/jwt";  // JWT auth system
+import { setupDatabase } from "./db/setup";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
+import { authRoutes } from "./routes/authRoutes";
 
 export const app = Fastify({
-  logger: false,
+  logger: true,
 });
 
 export async function buildApp() {
   await app.register(postgresPlugin);
+  
+  await app.register(jwtPlugin);
+  await setupDatabase(app);
+
   await app.register(swagger, {
     openapi: {
       info: {
@@ -17,12 +23,52 @@ export async function buildApp() {
         description: "Backend for bus route discovery",
         version: "0.1.0",
       },
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT"
+          }
+        }
+      }
     },
   });
-  await app.register(routes);
- 
+
+  app.register(authRoutes, { prefix: "/api/auth" });
+  
+  app.get(
+    "/api/protected",
+    {
+      preHandler: [app.authenticate],
+      
+      schema: {
+        security: [{ bearerAuth: [] }]
+      }
+    },
+    async (request, reply) => {
+      
+      return { 
+        message: "This is a protected route",
+        user: request.user 
+      };
+    }
+  );
+
+  
+  app.get("/api/public", async (request, reply) => {
+    return { 
+      message: "This is public - no token needed" 
+    };
+  });
+
   await app.register(swaggerUI, {
     routePrefix: "/docs",
   });
+
+  app.get("/health", async () => {
+    return { status: "OK", timestamp: new Date().toISOString() };
+  });
+
   return app;
 }
