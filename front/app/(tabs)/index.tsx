@@ -1,98 +1,262 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import React from 'react';
+import { View, StyleSheet, ScrollView, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { Colors } from '@/constants/theme';
+import { Sidebar } from '@/components/Sidebar';
+import { DashboardHeader } from '@/components/DashboardHeader';
+import { StatCard } from '@/components/StatCard';
+import { RoutePlannerWidget } from '@/components/RoutePlannerWidget';
+import { LiveTransitFeed } from '@/components/LiveTransitFeed';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const isWeb = Platform.OS === 'web';
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  return (
+    <KeyboardAvoidingView 
+      style={{ flex: 1 }} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+        <View style={styles.container}>
+          {isWeb && <Sidebar />}
+          
+          <View style={styles.mainContent}>
+            <DashboardHeader />
+            
+            <ScrollView 
+              style={styles.scrollContent} 
+              contentContainerStyle={styles.scrollInner}
+              showsVerticalScrollIndicator={false}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.heroSection}>
+                <ThemedText type="title" style={styles.pageTitle}>Dashboard</ThemedText>
+                <ThemedText style={styles.pageSubtitle}>
+                  Real-time overview of your transit network performance and routing analytics.
+                </ThemedText>
+              </View>
+
+              <View style={styles.statsRow}>
+                <StatCard 
+                  title="Routes Optimized" 
+                  value="1,284" 
+                  change="+12.5%" 
+                  isPositive={true} 
+                  icon="git-branch-outline" 
+                />
+                <StatCard 
+                  title="Active Stations" 
+                  value="342" 
+                  change="+3.2%" 
+                  isPositive={true} 
+                  icon="location-outline" 
+                />
+                <StatCard 
+                  title="Avg. Travel Time" 
+                  value="24 min" 
+                  change="-8.1%" 
+                  isPositive={true} 
+                  icon="time-outline" 
+                />
+                <StatCard 
+                  title="Efficiency Score" 
+                  value="94.2%" 
+                  change="+2.4%" 
+                  isPositive={true} 
+                  icon="speedometer-outline" 
+                />
+              </View>
+
+              <View style={styles.dashboardGrid}>
+                <View style={styles.leftColumn}>
+                    <View style={styles.chartPlaceholder}>
+                        <View style={styles.chartHeader}>
+                            <ThemedText type="defaultSemiBold">Network Performance</ThemedText>
+                            <View style={styles.chartLegend}>
+                                <View style={styles.legendWrapper}>
+                                    <View style={[styles.legendItem, { backgroundColor: Colors.dark.primary }]} />
+                                    <ThemedText style={styles.legendText}>Riders</ThemedText>
+                                </View>
+                                <View style={styles.legendWrapper}>
+                                    <View style={[styles.legendItem, { backgroundColor: '#3B82F6' }]} />
+                                    <ThemedText style={styles.legendText}>On-Time %</ThemedText>
+                                </View>
+                            </View>
+                        </View>
+                        {/* Simplified line chart visual using borders/circles for concept */}
+                        <View style={styles.chartVisual}>
+                             <View style={styles.chartGridLine} />
+                             <View style={styles.chartGridLine} />
+                             <View style={styles.chartGridLine} />
+                             
+                             <View style={styles.waveContainer}>
+                                <View style={styles.chartLine} />
+                                <View style={styles.chartPoint} />
+                             </View>
+                        </View>
+                    </View>
+                    
+                    <View style={styles.feedSection}>
+                        <LiveTransitFeed />
+                    </View>
+                </View>
+
+                <View style={styles.rightColumn}>
+                    <RoutePlannerWidget />
+                    
+                    <View style={styles.infoCard}>
+                        <ThemedText type="defaultSemiBold" style={styles.infoTitle}>Quick Insights</ThemedText>
+                        <ThemedText style={styles.infoText}>
+                            System performance is currently 4% above average for this time of day.
+                        </ThemedText>
+                    </View>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+    </KeyboardAvoidingView>
+
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: Colors.dark.background,
+  },
+  mainContent: {
+    flex: 1,
+    height: '100%',
+  },
+  scrollContent: {
+    flex: 1,
+  },
+  scrollInner: {
+    padding: 24,
+    gap: 32,
+    paddingBottom: 40,
+  },
+  heroSection: {
+    gap: 8,
+  },
+  pageTitle: {
+    color: '#FFFFFF',
+    fontSize: 28,
+  },
+  pageSubtitle: {
+    color: Colors.dark.icon,
+    fontSize: 14,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+  },
+  dashboardGrid: {
+    flexDirection: Platform.select({ web: 'row', default: 'column' }),
+    gap: 24,
+  },
+  leftColumn: {
+    flex: 2,
+    gap: 24,
+  },
+  rightColumn: {
+    flex: 1,
+    gap: 24,
+  },
+  chartPlaceholder: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    height: 300,
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  chartLegend: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 16,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  legendWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
+  legendItem: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    fontSize: 12,
+    color: Colors.dark.icon,
+  },
+  chartVisual: {
+    flex: 1,
+    position: 'relative',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  chartGridLine: {
+    height: 1,
+    backgroundColor: Colors.dark.border,
+    width: '100%',
+    borderStyle: 'dashed',
+  },
+  waveContainer: {
+    position: 'absolute',
+    top: 0,
     bottom: 0,
     left: 0,
-    position: 'absolute',
+    right: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartLine: {
+    width: '100%',
+    height: 2,
+    backgroundColor: Colors.dark.primary,
+    opacity: 0.6,
+  },
+  chartPoint: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.dark.primary,
+    shadowColor: Colors.dark.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 10,
+    marginTop: -7, // Half of height + half of line height
+  },
+  feedSection: {
+    flex: 1,
+  },
+  infoCard: {
+    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  infoTitle: {
+    color: '#3B82F6',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  infoText: {
+    color: Colors.dark.icon,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
+

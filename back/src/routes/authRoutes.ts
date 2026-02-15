@@ -17,33 +17,34 @@ export async function authRoutes(fastify: FastifyInstance) {
           password: string;
         };
 
-        const userCheck = await fastify.pg.query(
-          "SELECT id FROM users WHERE username = $1",
-          [username]
-        );
+        // MOCK REGISTRATION FOR FRONTEND TESTING
+        // const userCheck = await fastify.pg.query(
+        //   "SELECT id FROM users WHERE username = $1",
+        //   [username]
+        // );
 
-        if (userCheck.rows.length > 0) {
-          return reply.code(400).send({ error: "Username already exists" });
-        }
+        // if (userCheck.rows.length > 0) {
+        //   return reply.code(400).send({ error: "Username already exists" });
+        // }
 
-        const saltRounds = 10;
-        const passwordHash = await bcrypt.hash(password, saltRounds);
+        // const saltRounds = 10;
+        // const passwordHash = await bcrypt.hash(password, saltRounds);
 
-        const result = await fastify.pg.query(
-          "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username",
-          [username, passwordHash]
-        );
+        // const result = await fastify.pg.query(
+        //   "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username",
+        //   [username, passwordHash]
+        // );
 
-        const user = result.rows[0];
+        // const user = result.rows[0];
         
         const token = fastify.jwt.sign({
-          id: user.id,
-          username: user.username
+          id: 1, // Mock ID
+          username: username
         });
 
         return reply.code(201).send({
-          message: "User registered successfully",
-          userId: user.id,
+          message: "User registered successfully (MOCK)",
+          userId: 1, // Mock ID
           token: token
         });
       } catch (error) {
@@ -63,34 +64,36 @@ export async function authRoutes(fastify: FastifyInstance) {
           password: string;
         };
 
-        const result = await fastify.pg.query(
-          "SELECT id, username, password_hash FROM users WHERE username = $1",
-          [username]
-        );
+        // MOCK LOGIN FOR FRONTEND TESTING
+        // const result = await fastify.pg.query(
+        //   "SELECT id, username, password_hash FROM users WHERE username = $1",
+        //   [username]
+        // );
 
-        if (result.rows.length === 0) {
-          return reply.code(401).send({ error: "Invalid credentials" });
-        }
+        // if (result.rows.length === 0) {
+        //   return reply.code(401).send({ error: "Invalid credentials" });
+        // }
 
-        const user = result.rows[0];
+        // const user = result.rows[0];
 
-        const isValid = await bcrypt.compare(password, user.password_hash);
+        // const isValid = await bcrypt.compare(password, user.password_hash);
         
-        if (!isValid) {
-          return reply.code(401).send({ error: "Invalid credentials" });
-        }
+        // if (!isValid) {
+        //   return reply.code(401).send({ error: "Invalid credentials" });
+        // }
 
+        // Accept any login for testing
         const token = fastify.jwt.sign({
-          id: user.id,
-          username: user.username
+          id: 1, // Mock ID
+          username: username
         });
 
         return reply.send({
-          message: "Login successful",
+          message: "Login successful (MOCK)",
           token: token,
           user: {
-            id: user.id,
-            username: user.username
+            id: 1,
+            username: username
           }
         });
       } catch (error) {

@@ -5,8 +5,8 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#2DD4BF';
+const tintColorDark = '#2DD4BF';
 
 export const Colors = {
   light: {
@@ -18,14 +18,18 @@ export const Colors = {
     tabIconSelected: tintColorLight,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: '#F8FAFC',
+    background: '#0B0E11', // Deep dark background from design
+    surface: '#15191C',    // Card/Surface color
+    primary: '#2DD4BF',    // Signature Teal
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
+    icon: '#94A3B8',
+    tabIconDefault: '#94A3B8',
     tabIconSelected: tintColorDark,
+    border: '#1E293B',
   },
 };
+
 
 export const Fonts = Platform.select({
   ios: {

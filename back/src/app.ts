@@ -27,10 +27,10 @@ export async function buildApp() {
 
     reply.send(error);
   });
-  await app.register(postgresPlugin);
+  // await app.register(postgresPlugin);
   
   await app.register(jwtPlugin);
-  await setupDatabase(app);
+  // await setupDatabase(app);
 
   await app.register(swagger, {
     openapi: {
