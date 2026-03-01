@@ -1,12 +1,15 @@
-import React from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, TextInput, TouchableOpacity, Platform, Text, Modal } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { ThemedText } from './themed-text';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/hooks/AuthContext';
 
 export function DashboardHeader() {
   const insets = useSafeAreaInsets();
+  const { signOut } = useAuth();
+  const [dropdownVisible, setDropdownVisible] = useState(false);
   
   return (
     <View style={[styles.container, { paddingTop: Platform.OS === 'ios' ? insets.top : insets.top + 10 }]}>
@@ -26,11 +29,42 @@ export function DashboardHeader() {
                 <View style={styles.notificationDot} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.profileButton}>
-                <View style={styles.avatar}>
-                    <ThemedText style={styles.avatarText}>TF</ThemedText>
-                </View>
-            </TouchableOpacity>
+            <View style={{ position: 'relative', zIndex: 100 }}>
+                <TouchableOpacity 
+                  style={styles.profileButton}
+                  onPress={() => setDropdownVisible(true)}
+                >
+                    <View style={styles.avatar}>
+                        <ThemedText style={styles.avatarText}>TF</ThemedText>
+                    </View>
+                </TouchableOpacity>
+
+                <Modal
+                  visible={dropdownVisible}
+                  transparent={true}
+                  animationType="fade"
+                  onRequestClose={() => setDropdownVisible(false)}
+                >
+                  <TouchableOpacity 
+                    style={styles.modalOverlay}
+                    activeOpacity={1}
+                    onPressOut={() => setDropdownVisible(false)}
+                  >
+                    <View style={[styles.dropdownMenu, { top: Platform.OS === 'ios' ? insets.top + 55 : insets.top + 65 }]}>
+                      <TouchableOpacity 
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setDropdownVisible(false);
+                          signOut();
+                        }}
+                      >
+                        <Ionicons name="log-out-outline" size={20} color={Colors.dark.icon} />
+                        <Text style={styles.dropdownText}>Log out</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Modal>
+            </View>
         </View>
       </View>
     </View>
@@ -105,5 +139,37 @@ const styles = StyleSheet.create({
     color: Colors.dark.background,
     fontSize: 12,
     fontWeight: '700',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    right: 20,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 8,
+    paddingVertical: 8,
+    minWidth: 150,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    zIndex: 1000,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  dropdownText: {
+    color: Colors.dark.icon,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
 });

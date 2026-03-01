@@ -10,8 +10,11 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  SafeAreaView
 } from "react-native";
 import { api } from "@/config/api";
+import { Colors } from "@/constants/theme";
+import { Ionicons } from '@expo/vector-icons';
 import { AxiosError } from "axios";
 import { useAuth } from "@/hooks/AuthContext";
 
@@ -50,95 +53,138 @@ export default function Login() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <KeyboardAvoidingView 
-        style={styles.container} 
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
-      >
-        <Text style={styles.title}>Welcome Back</Text>
-
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your username"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-        </View>
-
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
-          disabled={loading}
+    <SafeAreaView style={styles.safeArea}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <KeyboardAvoidingView 
+          style={styles.container} 
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
         >
-          <Text style={styles.buttonText}>
-            {loading ? "Logging in..." : "Login"}
-          </Text>
-        </TouchableOpacity>
-      </KeyboardAvoidingView>
-    </TouchableWithoutFeedback>
+          <View style={styles.header}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="bus" size={40} color={Colors.dark.primary} />
+            </View>
+            <Text style={styles.title}>System Access</Text>
+            <Text style={styles.subtitle}>Transit Network Control</Text>
+          </View>
+
+          <View style={styles.formContainer}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>USERNAME</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter username"
+                placeholderTextColor={Colors.dark.icon}
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>PASSWORD</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter password"
+                placeholderTextColor={Colors.dark.icon}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "AUTHENTICATING..." : "SIGN IN"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: Colors.dark.background,
+  },
   container: {
     flex: 1,
+    paddingHorizontal: 32,
     justifyContent: "center",
-    padding: 20,
-    backgroundColor: "#fff",
+  },
+  header: {
+    marginBottom: 48,
+    alignItems: 'center',
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(45, 212, 191, 0.1)', // Light teal background
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    marginBottom: 40,
-    textAlign: "center",
-    color: "#333",
+    fontSize: 32,
+    fontWeight: "800",
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
-  inputContainer: {
-    marginBottom: 20,
+  subtitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: Colors.dark.icon,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  formContainer: {
+    gap: 24,
+  },
+  inputGroup: {
+    gap: 8,
   },
   label: {
-    fontSize: 16,
-    marginBottom: 8,
-    color: "#333",
+    fontSize: 12,
+    fontWeight: "700",
+    color: Colors.dark.icon,
+    letterSpacing: 1,
   },
   input: {
-    height: 50,
-    borderColor: "#ddd",
+    height: 56,
+    backgroundColor: Colors.dark.surface,
     borderWidth: 1,
-    paddingHorizontal: 15,
-    borderRadius: 8,
+    borderColor: Colors.dark.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
     fontSize: 16,
-    backgroundColor: "#f9f9f9",
+    color: '#FFFFFF',
+    fontWeight: "500",
   },
   button: {
-    backgroundColor: "#007AFF",
-    height: 50,
-    borderRadius: 8,
+    height: 56,
+    backgroundColor: Colors.dark.primary,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 20,
+    marginTop: 8,
   },
   buttonDisabled: {
-    backgroundColor: "#a0c4ff",
+    backgroundColor: Colors.dark.border,
   },
   buttonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
+    color: Colors.dark.background,
+    fontSize: 16,
+    fontWeight: "700",
+    letterSpacing: 1,
   },
 });
