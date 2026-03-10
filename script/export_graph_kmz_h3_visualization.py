@@ -117,9 +117,9 @@ def main():
 
     # Node styles: endpoint (green/small), single-route (yellow), transfer/cross (red/large)
     for style_id, color, scale, label in [
-        ("endpoint", "ff00ff00", "0.6", "Endpoint"),          # green
-        ("singleRoute", "ff00d4ff", "0.7", "Single Route"),   # yellow
-        ("transfer", "ff0000ff", "1.0", "Transfer/Cross"),    # red
+        ("endpoint", "ff00ff00", "0.6", "Endpoint"),  # green
+        ("singleRoute", "ff00d4ff", "0.7", "Single Route"),  # yellow
+        ("transfer", "ff0000ff", "1.0", "Transfer/Cross"),  # red
     ]:
         style = SubElement(document, "Style", id=style_id)
         icon_style = SubElement(style, "IconStyle")
@@ -133,8 +133,9 @@ def main():
     # Walking edge style (dashed gray line)
     walk_style = SubElement(document, "Style", id="walking")
     walk_line = SubElement(walk_style, "LineStyle")
-    SubElement(walk_line, "color").text = "ff808080"  # gray
-    SubElement(walk_line, "width").text = "2"
+    # Make walking edges bright magenta and thicker for easy visibility
+    SubElement(walk_line, "color").text = "ffff00ff"  # magenta (AA BB GG RR)
+    SubElement(walk_line, "width").text = "5"
 
     # Line styles per route (solid colored lines for bus routes)
     for route_id, color in route_color_map.items():
@@ -168,7 +169,7 @@ def main():
         if route_names:
             desc_lines.append(f'Lines: {", ".join(str(n) for n in route_names)}')
         SubElement(pm, "description").text = "\n".join(desc_lines)
-        
+
         # Choose style: endpoint (green) > transfer (red) > single-route (yellow)
         if is_endpoint:
             style_url = "#endpoint"

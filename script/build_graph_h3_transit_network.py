@@ -32,8 +32,14 @@ import numpy as np
 # Constants
 # ----------------------------------------------------------------------
 AVG_BUS_SPEED_KMH = 25.0
+WALKING_SPEED_MS = 1.4
 TRANSFER_DIST_THRESHOLD = 200.0  # meters – create node when routes are this close
 H3_RESOLUTION = 11  # edge ~25m, cell width ~43m ≈ 20% of 200m
+WALKING_EDGE_MAX_DIST = 500.0  # meters
+
+# Use H3 ring search to find nearby nodes efficiently for walking links.
+H3_EDGE_LEN_M = 25.0  # good approximation at resolution 11
+H3_WALK_RING_K = math.ceil(WALKING_EDGE_MAX_DIST / H3_EDGE_LEN_M)
 
 
 # ----------------------------------------------------------------------
@@ -265,6 +271,7 @@ def main():
                 "lon": float(lon),
                 "lat": float(lat),
                 "route_ids": route_set,
+                "h3_cell": cell,
             }
         )
     conn.commit()
@@ -387,13 +394,100 @@ def main():
     print(f"Created {edges_created} directed route edges.")
 
     # ------------------------------------------------------------------
-    # 10. Done (walking edges deferred)
+    # 10. Add walking edges using H3 neighborhood search
+    # ------------------------------------------------------------------
+    print("Adding walking edges using H3 neighborhood search...")
+
+    node_by_id = {nrec["id"]: nrec for nrec in node_records}
+    cell_to_node_ids = defaultdict(list)
+    for nrec in node_records:
+        cell_to_node_ids[nrec["h3_cell"]].append(nrec["id"])
+
+    walking_edges_created = 0
+
+    for src in node_records:
+        src_id = src["id"]
+        src_cell = src["h3_cell"]
+
+        nearby_cells = h3.grid_disk(src_cell, H3_WALK_RING_K)
+        for ncell in nearby_cells:
+            for dst_id in cell_to_node_ids.get(ncell, []):
+                # Create each pair once (undirected pair), then insert both directions.
+                if dst_id <= src_id:
+                    continue
+
+                dst = node_by_id[dst_id]
+
+                # Skip walking links between nodes that already share at least one bus route.
+                if src["route_ids"] & dst["route_ids"]:
+                    continue
+
+                dist_m = haversine(src["lon"], src["lat"], dst["lon"], dst["lat"])
+                if dist_m > WALKING_EDGE_MAX_DIST:
+                    continue
+
+                distance_km = dist_m / 1000.0
+                travel_time = dist_m / WALKING_SPEED_MS
+                walk_geom = LineString(
+                    [(src["lon"], src["lat"]), (dst["lon"], dst["lat"])]
+                ).wkt
+
+                # Forward walking edge
+                cur.execute(
+                    """
+                    INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
+                    SELECT %s, %s, NULL, %s, %s, ST_GeomFromText(%s, 4326)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM edges
+                        WHERE from_node = %s AND to_node = %s AND route_id IS NULL
+                    )
+                """,
+                    (
+                        src_id,
+                        dst_id,
+                        travel_time,
+                        distance_km,
+                        walk_geom,
+                        src_id,
+                        dst_id,
+                    ),
+                )
+                walking_edges_created += cur.rowcount
+
+                # Backward walking edge
+                cur.execute(
+                    """
+                    INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
+                    SELECT %s, %s, NULL, %s, %s, ST_GeomFromText(%s, 4326)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM edges
+                        WHERE from_node = %s AND to_node = %s AND route_id IS NULL
+                    )
+                """,
+                    (
+                        dst_id,
+                        src_id,
+                        travel_time,
+                        distance_km,
+                        walk_geom,
+                        dst_id,
+                        src_id,
+                    ),
+                )
+                walking_edges_created += cur.rowcount
+
+    conn.commit()
+    print(f"Created {walking_edges_created} directed walking edges.")
+
+    # ------------------------------------------------------------------
+    # 11. Done
     # ------------------------------------------------------------------
     cur.close()
     conn.close()
     print("Graph building completed successfully.")
     print(
-        f"Summary: {len(routes)} routes, {len(node_records)} nodes, {edges_created} edges"
+        f"Summary: {len(routes)} routes, {len(node_records)} nodes, "
+        f"{edges_created} bus edges, {walking_edges_created} walking edges"
     )
 
 
