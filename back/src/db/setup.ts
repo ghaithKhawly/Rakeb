@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 
 export async function setupDatabase(fastify: FastifyInstance) {
   const client = await fastify.pg.connect();
-  console.log("hi");
+  console.log("Setting up database...");
   try {
     await client.query(`CREATE EXTENSION IF NOT EXISTS postgis;`);
 
@@ -24,8 +24,6 @@ export async function setupDatabase(fastify: FastifyInstance) {
         geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-
-      -- Spatial index for fast nearest-neighbor and radius queries
       CREATE INDEX IF NOT EXISTS idx_nodes_geom ON nodes USING GIST (geom);
     `);
 
@@ -38,11 +36,31 @@ export async function setupDatabase(fastify: FastifyInstance) {
         base_price INTEGER,
         frequency_minutes INTEGER,
         crowding_tendency VARCHAR(10) DEFAULT 'medium',
+        geom GEOMETRY(LINESTRING, 4326),          -- full route geometry for display
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-     await client.query(`
+   
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='routes' AND column_name='geom'
+        ) THEN
+          ALTER TABLE routes ADD COLUMN geom GEOMETRY(LINESTRING, 4326);
+        END IF;
+      END $$;
+    `);
+
+    // Spatial index on routes.geom
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_routes_geom ON routes USING GIST (geom);
+    `);
+
+    // Edges table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS edges (
         id SERIAL PRIMARY KEY,
         from_node INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -54,7 +72,6 @@ export async function setupDatabase(fastify: FastifyInstance) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (from_node, to_node, route_id)
       );
-
       CREATE INDEX IF NOT EXISTS idx_edges_from_node ON edges(from_node);
       CREATE INDEX IF NOT EXISTS idx_edges_route_id ON edges(route_id);
       CREATE INDEX IF NOT EXISTS idx_edges_geom ON edges USING GIST (geom);
@@ -67,7 +84,6 @@ export async function setupDatabase(fastify: FastifyInstance) {
         sequence_order INTEGER NOT NULL,
         PRIMARY KEY (route_id, sequence_order)
       );
-
       CREATE INDEX IF NOT EXISTS idx_route_nodes_node_id ON route_nodes(node_id);
     `);
 
@@ -95,7 +111,6 @@ export async function setupDatabase(fastify: FastifyInstance) {
         hour_of_day SMALLINT NOT NULL,
         traveled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-
       CREATE INDEX IF NOT EXISTS idx_travel_history_user ON travel_history(user_id);
       CREATE INDEX IF NOT EXISTS idx_travel_history_user_time ON travel_history(user_id, day_of_week, hour_of_day);
       CREATE INDEX IF NOT EXISTS idx_travel_history_origin ON travel_history USING GIST (origin_geom);

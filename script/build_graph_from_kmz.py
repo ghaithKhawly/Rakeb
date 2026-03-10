@@ -2,9 +2,13 @@
 """
 KMZ → Graph Builder for Syrian Public Transit
 - Reads KMZ files, extracts bus routes.
-- Places nodes at route intersections, closest points of close parallels (<200m), and endpoints.
+- Places nodes at:
+    * route intersections (one node)
+    * midpoints of closest points when routes are within 200m (one node)
+    * route endpoints
 - Merges nearby nodes (10m tolerance).
 - Builds directed edges for each route and walking edges between nearby nodes.
+- Stores full route geometry in routes.geom.
 - Inserts all into PostgreSQL/PostGIS.
 """
 
@@ -18,27 +22,25 @@ from xml.etree import ElementTree as ET
 
 import psycopg2
 import psycopg2.extras
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, MultiPoint
 from shapely.ops import nearest_points, substring
-from shapely import wkb
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 # ----------------------------------------------------------------------
 # Constants
 # ----------------------------------------------------------------------
-AVG_BUS_SPEED_KMH = 25.0          # used for travel time calculation
-WALKING_SPEED_MS = 1.4             # 5 km/h, for walking edges
-TRANSFER_DIST_THRESHOLD = 200.0    # meters – create nodes if routes are this close
-NODE_MERGE_TOLERANCE = 10.0        # meters – merge nodes within this distance
-WALKING_EDGE_MAX_DIST = 500.0      # meters – create walking edges between nodes
-ROUTE_ASSOCIATION_DIST = 150.0     # max distance for a node to be considered "on" a route
+AVG_BUS_SPEED_KMH = 25.0
+WALKING_SPEED_MS = 1.4
+TRANSFER_DIST_THRESHOLD = 200.0      # meters
+NODE_MERGE_TOLERANCE = 10.0          # meters
+WALKING_EDGE_MAX_DIST = 500.0        # meters
+ROUTE_ASSOCIATION_DIST = 150.0       # meters (for snapping nodes to routes)
 
 # ----------------------------------------------------------------------
 # Helper: parse KML coordinates
 # ----------------------------------------------------------------------
 def parse_coordinates(coord_string):
-    """Convert 'lon,lat,0 lon,lat,0 ...' to list of (lon, lat) tuples."""
     points = []
     for triplet in coord_string.strip().split():
         parts = triplet.split(',')
@@ -89,7 +91,7 @@ def main():
     # ------------------------------------------------------------------
     # 2. Parse all KMZ files, extract routes and simplified geometries
     # ------------------------------------------------------------------
-    routes = []  # list of dict: temp_id, name, geom (LineString)
+    routes = []  # list of dict: temp_id, name, geom_original (for display), geom_simplified (for graph)
     kml_ns = {'kml': 'http://www.opengis.net/kml/2.2'}
 
     for kmz_path in args.kmz_files:
@@ -119,12 +121,13 @@ def main():
                     if len(raw_coords) < 2:
                         continue
 
-                    line = LineString(raw_coords)
+                    original = LineString(raw_coords)
                     # Simplify: tolerance ~0.0005 deg ≈ 55m (adjust as needed)
-                    simplified = line.simplify(0.0005, preserve_topology=True)
+                    simplified = original.simplify(0.0005, preserve_topology=True)
                     routes.append({
                         'name': name,
-                        'geom': simplified,
+                        'geom_original': original,    # store for display
+                        'geom_simplified': simplified, # used for graph building
                         'temp_id': len(routes)
                     })
 
@@ -132,45 +135,45 @@ def main():
 
     # ------------------------------------------------------------------
     # 3. Insert routes into database (get real route_ids)
+    #    Store the full original geometry in routes.geom for display.
     # ------------------------------------------------------------------
     route_id_map = {}  # temp_id -> real id
     for r in routes:
         cur.execute("""
-            INSERT INTO routes (name, type, avg_speed_kmh, base_price, frequency_minutes, crowding_tendency)
-            VALUES (%s, 'bus', %s, NULL, NULL, 'medium')
+            INSERT INTO routes (name, type, avg_speed_kmh, base_price, frequency_minutes, crowding_tendency, geom)
+            VALUES (%s, 'bus', %s, NULL, NULL, 'medium', ST_GeomFromText(%s, 4326))
             RETURNING id
-        """, (r['name'], AVG_BUS_SPEED_KMH))
+        """, (r['name'], AVG_BUS_SPEED_KMH, r['geom_original'].wkt))
         route_id = cur.fetchone()[0]
         route_id_map[r['temp_id']] = route_id
         r['id'] = route_id
     conn.commit()
-    print("Routes inserted.")
+    print("Routes inserted with full geometry.")
 
     # ------------------------------------------------------------------
-    # 4. Generate candidate nodes
-    #    Each candidate: (lon, lat, set_of_route_ids)
+    # 4. Generate candidate nodes (each candidate: lon, lat, set_of_route_ids)
     # ------------------------------------------------------------------
-    candidate_nodes = []  # list of (lon, lat, route_set)
+    candidate_nodes = []
 
     def add_candidate(lon, lat, route_set):
         candidate_nodes.append((lon, lat, route_set))
 
-    # 4a. Endpoints of each route
+    # 4a. Endpoints of each route (use simplified geometry for consistency)
     for r in routes:
-        coords = list(r['geom'].coords)
+        coords = list(r['geom_simplified'].coords)
         # first point
         add_candidate(coords[0][0], coords[0][1], {r['id']})
-        # last point (skip if same as first)
+        # last point (if different)
         if len(coords) > 1 and (coords[-1][0] != coords[0][0] or coords[-1][1] != coords[0][1]):
             add_candidate(coords[-1][0], coords[-1][1], {r['id']})
 
     # 4b. Intersections and close parallels between route pairs
     n = len(routes)
     for i in range(n):
-        geom_i = routes[i]['geom']
+        geom_i = routes[i]['geom_simplified']
         id_i = routes[i]['id']
         for j in range(i+1, n):
-            geom_j = routes[j]['geom']
+            geom_j = routes[j]['geom_simplified']
             id_j = routes[j]['id']
 
             # Quick bounding‑box filter (in degrees)
@@ -180,25 +183,25 @@ def main():
             # Check for intersections
             intersect = geom_i.intersection(geom_j)
             if not intersect.is_empty:
-                # Intersection can be a Point or MultiPoint
                 if intersect.geom_type == 'Point':
                     points = [intersect]
                 elif intersect.geom_type == 'MultiPoint':
                     points = list(intersect.geoms)
                 else:
-                    # Could be LineString if routes overlap, but we ignore for now
+                    # Could be LineString if routes overlap; ignore for now
                     points = []
                 for pt in points:
                     add_candidate(pt.x, pt.y, {id_i, id_j})
+                continue
 
-            # Check for close parallels (if not intersecting)
-            # Use nearest_points to get the closest points on each route
+            # No intersection: check if they are close enough for a transfer node
             p1, p2 = nearest_points(geom_i, geom_j)
             dist_m = haversine(p1.x, p1.y, p2.x, p2.y)
             if dist_m < TRANSFER_DIST_THRESHOLD:
-                # Add both points as candidates (each belongs to its own route)
-                add_candidate(p1.x, p1.y, {id_i})
-                add_candidate(p2.x, p2.y, {id_j})
+                # Compute midpoint
+                mid_lon = (p1.x + p2.x) / 2.0
+                mid_lat = (p1.y + p2.y) / 2.0
+                add_candidate(mid_lon, mid_lat, {id_i, id_j})
 
     print(f"Generated {len(candidate_nodes)} raw candidate nodes.")
 
@@ -225,8 +228,7 @@ def main():
 
     final_nodes = []  # each: (lon, lat, route_set)
     for label, indices in clusters.items():
-        # Collect all points and route sets in this cluster
-        points = [candidate_nodes[i][:2] for i in indices]   # (lon, lat)
+        points = [candidate_nodes[i][:2] for i in indices]
         route_sets = [candidate_nodes[i][2] for i in indices]
 
         # Centroid (simple average)
@@ -241,7 +243,7 @@ def main():
     print(f"After clustering: {len(final_nodes)} final nodes.")
 
     # ------------------------------------------------------------------
-    # 6. Insert final nodes into database
+    # 6. Insert final nodes into database (convert NumPy floats to Python floats)
     # ------------------------------------------------------------------
     node_records = []  # list of dict: id, lon, lat, route_ids
     for lon, lat, route_set in final_nodes:
@@ -253,15 +255,16 @@ def main():
         node_id = cur.fetchone()[0]
         node_records.append({
             'id': node_id,
-            'lon': float(lon),            # also store as float for later use
+            'lon': float(lon),
             'lat': float(lat),
             'route_ids': route_set
         })
     conn.commit()
-    print(f"Inserted {len(node_records)} nodes.")   
+    print(f"Inserted {len(node_records)} nodes.")
 
     # ------------------------------------------------------------------
     # 7. Associate nodes with routes (compute fraction along each route)
+    #    Use simplified geometry for fraction calculation.
     # ------------------------------------------------------------------
     route_node_fractions = defaultdict(list)  # route_id -> list of (node_id, fraction)
 
@@ -273,7 +276,7 @@ def main():
             route_geom = None
             for r in routes:
                 if r['id'] == route_id:
-                    route_geom = r['geom']
+                    route_geom = r['geom_simplified']
                     break
             if route_geom is None:
                 continue
@@ -301,7 +304,7 @@ def main():
     print("Route-node associations inserted.")
 
     # ------------------------------------------------------------------
-    # 9. Build directed edges for each route
+    # 9. Build directed edges for each route (using simplified geometry)
     # ------------------------------------------------------------------
     edges_created = 0
     for route_id, frac_list in route_node_fractions.items():
@@ -312,7 +315,7 @@ def main():
         route_geom = None
         for r in routes:
             if r['id'] == route_id:
-                route_geom = r['geom']
+                route_geom = r['geom_simplified']
                 break
         if route_geom is None:
             continue
@@ -335,7 +338,7 @@ def main():
             try:
                 sub_geom = substring(route_geom, f1 * route_geom.length, f2 * route_geom.length)
             except Exception:
-                # Fallback: straight line between the two points (less accurate)
+                # Fallback: straight line between the two points
                 p1 = route_geom.interpolate(f1, normalized=True)
                 p2 = route_geom.interpolate(f2, normalized=True)
                 sub_geom = LineString([p1, p2])
@@ -353,7 +356,7 @@ def main():
             """, (from_id, to_id, route_id, travel_time, distance_km, sub_geom.wkt))
             edges_created += cur.rowcount
 
-            # Insert backward edge (reverse direction)
+            # Insert backward edge
             cur.execute("""
                 INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
                 VALUES (%s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))

@@ -22,6 +22,12 @@ export const registerSchema = {
       properties: {
         error: { type: "string" }
       }
+    },
+    500: {
+      type: "object",
+      properties: {
+        error: { type: "string" }
+      }
     }
   }
 };
@@ -52,6 +58,12 @@ export const loginSchema = {
       }
     },
     401: {
+      type: "object",
+      properties: {
+        error: { type: "string" }
+      }
+    },
+    500: {
       type: "object",
       properties: {
         error: { type: "string" }

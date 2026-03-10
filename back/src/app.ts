@@ -5,7 +5,7 @@ import { setupDatabase } from "./db/setup";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
 import { authRoutes } from "./routes/authRoutes";
-
+import { busRoutes } from "./routes/busRoutes";
 export const app = Fastify({
   logger: true,
 });
@@ -52,7 +52,7 @@ export async function buildApp() {
   });
 
   app.register(authRoutes, { prefix: "/api/auth" });
-  
+  app.register(busRoutes, { prefix: "/api/busses" });
   app.get(
     "/api/protected",
     {
