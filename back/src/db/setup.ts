@@ -21,10 +21,26 @@ export async function setupDatabase(fastify: FastifyInstance) {
         id SERIAL PRIMARY KEY,
         latitude DOUBLE PRECISION NOT NULL,
         longitude DOUBLE PRECISION NOT NULL,
+        h3_cell VARCHAR(20),
         geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_nodes_geom ON nodes USING GIST (geom);
+      CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+    `);
+
+    // Add h3_cell column to existing nodes table if missing
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='nodes' AND column_name='h3_cell'
+        ) THEN
+          ALTER TABLE nodes ADD COLUMN h3_cell VARCHAR(20);
+          CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+        END IF;
+      END $$;
     `);
 
     await client.query(`
