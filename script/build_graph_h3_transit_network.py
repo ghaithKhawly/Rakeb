@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-KMZ → Graph Builder for Syrian Public Transit (H3 Edition)
-- Reads KMZ files, extracts bus routes.
-- Places nodes at:
-    * route intersections (one node)
-    * midpoints of closest points when routes are within 200m (one node)
-    * route endpoints
-- Merges nearby nodes using H3 hexagonal grid (resolution 11, ~43m cell width).
-- Builds directed edges for each route (bidirectional).
-- Walking edges are deferred (not created here).
-- Stores full route geometry in routes.geom.
-- Inserts all into PostgreSQL/PostGIS.
+KMZ → H3 Graph Builder for Syrian Public Transit (Interactive Edition)
+
+Nodes carry:
+  - h3_cell, node_type (endpoint/transfer/single), route_count, is_transfer
+
+Edges carry:
+  - edge_type (bus/walking), speed_kmh, bearing_deg, congestion_factor,
+    travel_time, distance_km, full geometry
+
+All fields are designed to feed an A* / Dijkstra routing algorithm directly.
+
+Interactive flags can be passed via CLI or the script will prompt for them.
 """
 
 import os
@@ -29,17 +30,31 @@ from shapely.ops import nearest_points, substring
 import numpy as np
 
 # ----------------------------------------------------------------------
-# Constants
+# Hard defaults (overridden interactively)
 # ----------------------------------------------------------------------
-AVG_BUS_SPEED_KMH = 25.0
-WALKING_SPEED_MS = 1.4
-TRANSFER_DIST_THRESHOLD = 200.0  # meters – create node when routes are this close
-H3_RESOLUTION = 11  # edge ~25m, cell width ~43m ≈ 20% of 200m
-WALKING_EDGE_MAX_DIST = 500.0  # meters
+DEFAULT_AVG_BUS_SPEED_KMH    = 25.0
+DEFAULT_WALKING_SPEED_MS     = 1.4          # m/s  (~5 km/h)
+DEFAULT_TRANSFER_THRESHOLD_M = 200.0        # meters between routes → transfer node
+DEFAULT_H3_RESOLUTION        = 11           # ~43 m cell width
+DEFAULT_WALK_MAX_DIST_M      = 500.0        # max walking edge length
+DEFAULT_MAX_WALK_NEIGHBORS   = 5            # keep only N closest walking neighbors per node
+DEFAULT_CONGESTION_FACTOR    = 1.0          # neutral; >1 = slower (can be updated live)
 
-# Use H3 ring search to find nearby nodes efficiently for walking links.
-H3_EDGE_LEN_M = 25.0  # good approximation at resolution 11
-H3_WALK_RING_K = math.ceil(WALKING_EDGE_MAX_DIST / H3_EDGE_LEN_M)
+# H3 resolution 11 edge length ≈ 25 m, used to convert walk distance → ring k
+H3_EDGE_LEN_M = 25.0
+
+
+# ----------------------------------------------------------------------
+# Helper: prompt with a default, return typed value
+# ----------------------------------------------------------------------
+def prompt(label: str, default, cast=float) -> float:
+    raw = input(f"  {label} [{default}]: ").strip()
+    return cast(raw) if raw else cast(default)
+
+
+# ----------------------------------------------------------------------
+# Helper: parse KML coordinates
+# ----------------------------------------------------------------------
 
 
 # ----------------------------------------------------------------------
@@ -73,20 +88,88 @@ def haversine(lon1, lat1, lon2, lat2):
 
 
 # ----------------------------------------------------------------------
+# Helper: compass bearing (degrees) between two lon/lat points
+# ----------------------------------------------------------------------
+def bearing(lon1, lat1, lon2, lat2) -> float:
+    """Returns initial bearing in degrees [0, 360)."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dl   = math.radians(lon2 - lon1)
+    x = math.sin(dl) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dl)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+# ----------------------------------------------------------------------
 # Main script
 # ----------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Build graph from KMZ files")
+    parser = argparse.ArgumentParser(
+        description="H3 Graph Builder – Syrian Public Transit (Interactive)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("kmz_files", nargs="+", help="One or more KMZ files")
-    parser.add_argument("--dbname", required=True, help="PostgreSQL database name")
-    parser.add_argument("--user", required=True, help="Database user")
-    parser.add_argument("--password", required=True, help="Database password")
-    parser.add_argument("--host", default="localhost", help="Database host")
-    parser.add_argument("--port", default=5432, type=int, help="Database port")
+    parser.add_argument("--dbname",   required=True,  help="PostgreSQL database name")
+    parser.add_argument("--user",     required=True,  help="Database user")
+    parser.add_argument("--password", required=True,  help="Database password")
+    parser.add_argument("--host",     default="localhost", help="Database host")
+    parser.add_argument("--port",     default=5432, type=int, help="Database port")
+    # Optional overrides – if omitted the script will prompt interactively
+    parser.add_argument("--walk-dist",        type=float, help="Max walking edge distance in meters")
+    parser.add_argument("--walk-speed",       type=float, help="Walking speed in m/s")
+    parser.add_argument("--bus-speed",        type=float, help="Average bus speed in km/h")
+    parser.add_argument("--transfer-dist",    type=float, help="Route transfer threshold in meters")
+    parser.add_argument("--h3-resolution",    type=int,   help="H3 resolution (7-12)")
+    parser.add_argument("--congestion",       type=float, help="Initial congestion factor (1.0 = normal)")
+    parser.add_argument("--max-walk-neighbors", type=int, help="Max walking neighbors per node (prune to N closest)")
+    parser.add_argument("--non-interactive",  action="store_true",
+                        help="Skip all prompts; use defaults or provided flags")
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
-    # 1. Connect to PostgreSQL
+    # 1. Interactive parameter collection
+    # ------------------------------------------------------------------
+    ni = args.non_interactive  # shorthand
+
+    print()
+    print("=" * 60)
+    print("  H3 Transit Graph Builder — Parameter Setup")
+    print("=" * 60)
+
+    if ni:
+        walk_max_m       = args.walk_dist          or DEFAULT_WALK_MAX_DIST_M
+        walking_speed_ms = args.walk_speed          or DEFAULT_WALKING_SPEED_MS
+        avg_bus_speed    = args.bus_speed           or DEFAULT_AVG_BUS_SPEED_KMH
+        transfer_thresh  = args.transfer_dist       or DEFAULT_TRANSFER_THRESHOLD_M
+        h3_res           = args.h3_resolution       or DEFAULT_H3_RESOLUTION
+        congestion       = args.congestion          or DEFAULT_CONGESTION_FACTOR
+        max_walk_nbrs    = args.max_walk_neighbors  or DEFAULT_MAX_WALK_NEIGHBORS
+    else:
+        print("\n  Leave blank to accept the default shown in [brackets].\n")
+        walk_max_m       = args.walk_dist          or prompt("Max walking distance (m)",   DEFAULT_WALK_MAX_DIST_M)
+        walking_speed_ms = args.walk_speed          or prompt("Walking speed (m/s)",        DEFAULT_WALKING_SPEED_MS)
+        avg_bus_speed    = args.bus_speed           or prompt("Average bus speed (km/h)",   DEFAULT_AVG_BUS_SPEED_KMH)
+        transfer_thresh  = args.transfer_dist       or prompt("Transfer threshold (m)",     DEFAULT_TRANSFER_THRESHOLD_M)
+        h3_res           = int(args.h3_resolution   or prompt("H3 resolution (7-12)",       DEFAULT_H3_RESOLUTION, int))
+        congestion       = args.congestion          or prompt("Congestion factor (1.0=normal)", DEFAULT_CONGESTION_FACTOR)
+        max_walk_nbrs    = int(args.max_walk_neighbors or prompt("Max walking neighbors per node", DEFAULT_MAX_WALK_NEIGHBORS, int))
+
+    walk_ring_k = math.ceil(walk_max_m / H3_EDGE_LEN_M)
+
+    print()
+    print("  Parameters confirmed:")
+    print(f"    Walking distance max : {walk_max_m} m")
+    print(f"    Walking speed        : {walking_speed_ms} m/s  ({walking_speed_ms*3.6:.1f} km/h)")
+    print(f"    Bus speed            : {avg_bus_speed} km/h")
+    print(f"    Transfer threshold   : {transfer_thresh} m")
+    print(f"    H3 resolution        : {h3_res}  (cell ~{H3_EDGE_LEN_M*2:.0f} m wide)")
+    print(f"    Congestion factor    : {congestion}")
+    print(f"    Max walk neighbors   : {max_walk_nbrs} per node")
+    print(f"    H3 walk ring k       : {walk_ring_k}")
+    print()
+
+    # ------------------------------------------------------------------
+    # 2. Connect to PostgreSQL
     # ------------------------------------------------------------------
     conn = psycopg2.connect(
         dbname=args.dbname,
@@ -97,6 +180,39 @@ def main():
     )
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    # ------------------------------------------------------------------
+    # 2a. Migrate schema: add new routing columns if they don't exist yet
+    # ------------------------------------------------------------------
+    cur.execute("""
+        DO $$ BEGIN
+            -- nodes
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='node_type') THEN
+                ALTER TABLE nodes ADD COLUMN node_type VARCHAR(20) DEFAULT 'single';
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='route_count') THEN
+                ALTER TABLE nodes ADD COLUMN route_count INTEGER DEFAULT 1;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='is_transfer') THEN
+                ALTER TABLE nodes ADD COLUMN is_transfer BOOLEAN DEFAULT FALSE;
+            END IF;
+            -- edges
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='edge_type') THEN
+                ALTER TABLE edges ADD COLUMN edge_type VARCHAR(10) DEFAULT 'bus';
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='speed_kmh') THEN
+                ALTER TABLE edges ADD COLUMN speed_kmh DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='bearing_deg') THEN
+                ALTER TABLE edges ADD COLUMN bearing_deg DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='congestion_factor') THEN
+                ALTER TABLE edges ADD COLUMN congestion_factor DOUBLE PRECISION DEFAULT 1.0;
+            END IF;
+        END $$;
+    """)
+    conn.commit()
+    print("Schema columns verified / migrated.")
 
     # ------------------------------------------------------------------
     # 2. Parse all KMZ files, extract routes and simplified geometries
@@ -159,7 +275,7 @@ def main():
             VALUES (%s, 'bus', %s, NULL, NULL, 'medium', ST_GeomFromText(%s, 4326))
             RETURNING id
         """,
-            (r["name"], AVG_BUS_SPEED_KMH, r["geom_original"].wkt),
+            (r["name"], avg_bus_speed, r["geom_original"].wkt),
         )
         route_id = cur.fetchone()[0]
         route_id_map[r["temp_id"]] = route_id
@@ -196,7 +312,7 @@ def main():
             id_j = routes[j]["id"]
 
             # Quick bounding‑box filter (in degrees)
-            if geom_i.distance(geom_j) > TRANSFER_DIST_THRESHOLD / 111000:
+            if geom_i.distance(geom_j) > transfer_thresh / 111000:
                 continue
 
             # Check for intersections
@@ -216,7 +332,7 @@ def main():
             # No intersection: check if they are close enough for a transfer node
             p1, p2 = nearest_points(geom_i, geom_j)
             dist_m = haversine(p1.x, p1.y, p2.x, p2.y)
-            if dist_m < TRANSFER_DIST_THRESHOLD:
+            if dist_m < transfer_thresh:
                 # Compute midpoint
                 mid_lon = (p1.x + p2.x) / 2.0
                 mid_lat = (p1.y + p2.y) / 2.0
@@ -234,7 +350,7 @@ def main():
 
     cell_groups = defaultdict(list)  # h3_cell -> list of (lon, lat, route_set)
     for lon, lat, route_set in candidate_nodes:
-        cell = h3.latlng_to_cell(lat, lon, H3_RESOLUTION)
+        cell = h3.latlng_to_cell(lat, lon, h3_res)
         cell_groups[cell].append((lon, lat, route_set))
 
     final_nodes = []  # each: (lon, lat, route_set, h3_cell)
@@ -252,17 +368,35 @@ def main():
     print(f"After clustering: {len(final_nodes)} final nodes.")
 
     # ------------------------------------------------------------------
-    # 6. Insert final nodes into database (with H3 cell ID)
+    # 6. Insert final nodes into database (with H3 cell ID + routing meta)
     # ------------------------------------------------------------------
     node_records = []  # list of dict: id, lon, lat, route_ids
     for lon, lat, route_set, cell in final_nodes:
+        rc = len(route_set)
+        is_transfer = rc > 1
+        # Check if this node is an endpoint of any route
+        is_endpoint = False
+        for r in routes:
+            coords = list(r["geom_simplified"].coords)
+            ep_cell_start = h3.latlng_to_cell(coords[0][1],  coords[0][0],  h3_res)
+            ep_cell_end   = h3.latlng_to_cell(coords[-1][1], coords[-1][0], h3_res)
+            if cell in (ep_cell_start, ep_cell_end):
+                is_endpoint = True
+                break
+        if is_endpoint:
+            node_type = "endpoint"
+        elif is_transfer:
+            node_type = "transfer"
+        else:
+            node_type = "single"
+
         cur.execute(
             """
-            INSERT INTO nodes (latitude, longitude, h3_cell)
-            VALUES (%s, %s, %s)
+            INSERT INTO nodes (latitude, longitude, h3_cell, node_type, route_count, is_transfer)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
         """,
-            (float(lat), float(lon), cell),
+            (float(lat), float(lon), cell, node_type, rc, is_transfer),
         )
         node_id = cur.fetchone()[0]
         node_records.append(
@@ -272,10 +406,13 @@ def main():
                 "lat": float(lat),
                 "route_ids": route_set,
                 "h3_cell": cell,
+                "node_type": node_type,
+                "route_count": rc,
+                "is_transfer": is_transfer,
             }
         )
     conn.commit()
-    print(f"Inserted {len(node_records)} nodes.")
+    print(f"Inserted {len(node_records)} nodes (endpoint/transfer/single classified).")
 
     # ------------------------------------------------------------------
     # 7. Associate nodes with routes (compute fraction along each route)
@@ -366,27 +503,38 @@ def main():
             # Approximate length in meters (crude but ok for short segments)
             distance_m = sub_geom.length * 111000
             distance_km = distance_m / 1000.0
-            travel_time = distance_km / AVG_BUS_SPEED_KMH * 3600.0  # seconds
+            travel_time = distance_km / avg_bus_speed * 3600.0  # seconds
+
+            # Compute bearing from start → end of sub-segment
+            sc = list(sub_geom.coords)
+            fwd_bearing = bearing(sc[0][0], sc[0][1], sc[-1][0], sc[-1][1])
+            rev_bearing = (fwd_bearing + 180) % 360
 
             # Insert forward edge
             cur.execute(
                 """
-                INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
-                VALUES (%s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))
+                INSERT INTO edges
+                    (from_node, to_node, route_id, travel_time, distance_km,
+                     edge_type, speed_kmh, bearing_deg, congestion_factor, geom)
+                VALUES (%s, %s, %s, %s, %s, 'bus', %s, %s, %s, ST_GeomFromText(%s, 4326))
                 ON CONFLICT (from_node, to_node, route_id) DO NOTHING
             """,
-                (from_id, to_id, route_id, travel_time, distance_km, sub_geom.wkt),
+                (from_id, to_id, route_id, travel_time, distance_km,
+                 avg_bus_speed, fwd_bearing, congestion, sub_geom.wkt),
             )
             edges_created += cur.rowcount
 
             # Insert backward edge
             cur.execute(
                 """
-                INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
-                VALUES (%s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))
+                INSERT INTO edges
+                    (from_node, to_node, route_id, travel_time, distance_km,
+                     edge_type, speed_kmh, bearing_deg, congestion_factor, geom)
+                VALUES (%s, %s, %s, %s, %s, 'bus', %s, %s, %s, ST_GeomFromText(%s, 4326))
                 ON CONFLICT (from_node, to_node, route_id) DO NOTHING
             """,
-                (to_id, from_id, route_id, travel_time, distance_km, sub_geom.wkt),
+                (to_id, from_id, route_id, travel_time, distance_km,
+                 avg_bus_speed, rev_bearing, congestion, sub_geom.wkt),
             )
             edges_created += cur.rowcount
 
@@ -395,86 +543,106 @@ def main():
 
     # ------------------------------------------------------------------
     # 10. Add walking edges using H3 neighborhood search
+    #     Phase A: collect all candidate pairs per node (with distance).
+    #     Phase B: keep only the closest `max_walk_nbrs` per node.
+    #     Phase C: insert the pruned set.
     # ------------------------------------------------------------------
     print("Adding walking edges using H3 neighborhood search...")
+    print(f"  (max {max_walk_nbrs} closest walking neighbors per node)")
 
+    walk_speed_kmh = walking_speed_ms * 3.6
     node_by_id = {nrec["id"]: nrec for nrec in node_records}
     cell_to_node_ids = defaultdict(list)
     for nrec in node_records:
         cell_to_node_ids[nrec["h3_cell"]].append(nrec["id"])
 
-    walking_edges_created = 0
+    # Phase A: collect candidates  {src_id: [(dist_m, dst_id), ...]}
+    walk_candidates = defaultdict(list)
 
     for src in node_records:
         src_id = src["id"]
         src_cell = src["h3_cell"]
 
-        nearby_cells = h3.grid_disk(src_cell, H3_WALK_RING_K)
+        nearby_cells = h3.grid_disk(src_cell, walk_ring_k)
         for ncell in nearby_cells:
             for dst_id in cell_to_node_ids.get(ncell, []):
-                # Create each pair once (undirected pair), then insert both directions.
-                if dst_id <= src_id:
+                if dst_id == src_id:
                     continue
 
                 dst = node_by_id[dst_id]
 
-                # Skip walking links between nodes that already share at least one bus route.
+                # Skip nodes on the same bus route (they have bus edges already)
                 if src["route_ids"] & dst["route_ids"]:
                     continue
 
                 dist_m = haversine(src["lon"], src["lat"], dst["lon"], dst["lat"])
-                if dist_m > WALKING_EDGE_MAX_DIST:
+                if dist_m > walk_max_m:
                     continue
 
-                distance_km = dist_m / 1000.0
-                travel_time = dist_m / WALKING_SPEED_MS
-                walk_geom = LineString(
-                    [(src["lon"], src["lat"]), (dst["lon"], dst["lat"])]
-                ).wkt
+                walk_candidates[src_id].append((dist_m, dst_id))
 
-                # Forward walking edge
-                cur.execute(
-                    """
-                    INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
-                    SELECT %s, %s, NULL, %s, %s, ST_GeomFromText(%s, 4326)
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM edges
-                        WHERE from_node = %s AND to_node = %s AND route_id IS NULL
-                    )
-                """,
-                    (
-                        src_id,
-                        dst_id,
-                        travel_time,
-                        distance_km,
-                        walk_geom,
-                        src_id,
-                        dst_id,
-                    ),
-                )
-                walking_edges_created += cur.rowcount
+    # Phase B: prune to closest N per node, then deduplicate symmetric pairs
+    kept_pairs = set()  # (min_id, max_id) to avoid inserting same pair twice
+    for src_id, cands in walk_candidates.items():
+        cands.sort()  # sort by distance ascending
+        for dist_m, dst_id in cands[:max_walk_nbrs]:
+            pair = (min(src_id, dst_id), max(src_id, dst_id))
+            kept_pairs.add(pair)
 
-                # Backward walking edge
-                cur.execute(
-                    """
-                    INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
-                    SELECT %s, %s, NULL, %s, %s, ST_GeomFromText(%s, 4326)
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM edges
-                        WHERE from_node = %s AND to_node = %s AND route_id IS NULL
-                    )
-                """,
-                    (
-                        dst_id,
-                        src_id,
-                        travel_time,
-                        distance_km,
-                        walk_geom,
-                        dst_id,
-                        src_id,
-                    ),
-                )
-                walking_edges_created += cur.rowcount
+    print(f"  Candidates before pruning: {sum(len(c) for c in walk_candidates.values())} directed")
+    print(f"  Kept after pruning: {len(kept_pairs)} unique pairs → {len(kept_pairs) * 2} directed edges")
+
+    # Phase C: insert kept pairs (both directions)
+    walking_edges_created = 0
+    for a_id, b_id in kept_pairs:
+        a = node_by_id[a_id]
+        b = node_by_id[b_id]
+        dist_m = haversine(a["lon"], a["lat"], b["lon"], b["lat"])
+        distance_km = dist_m / 1000.0
+        travel_time = dist_m / walking_speed_ms
+        walk_geom = LineString([(a["lon"], a["lat"]), (b["lon"], b["lat"])]).wkt
+        fwd_bearing = bearing(a["lon"], a["lat"], b["lon"], b["lat"])
+        rev_bearing = (fwd_bearing + 180) % 360
+
+        # Forward
+        cur.execute(
+            """
+            INSERT INTO edges
+                (from_node, to_node, route_id, travel_time, distance_km,
+                 edge_type, speed_kmh, bearing_deg, congestion_factor, geom)
+            SELECT %s, %s, NULL, %s, %s, 'walking', %s, %s, %s, ST_GeomFromText(%s, 4326)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM edges
+                WHERE from_node = %s AND to_node = %s AND route_id IS NULL
+            )
+        """,
+            (
+                a_id, b_id, travel_time, distance_km,
+                walk_speed_kmh, fwd_bearing, congestion, walk_geom,
+                a_id, b_id,
+            ),
+        )
+        walking_edges_created += cur.rowcount
+
+        # Backward
+        cur.execute(
+            """
+            INSERT INTO edges
+                (from_node, to_node, route_id, travel_time, distance_km,
+                 edge_type, speed_kmh, bearing_deg, congestion_factor, geom)
+            SELECT %s, %s, NULL, %s, %s, 'walking', %s, %s, %s, ST_GeomFromText(%s, 4326)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM edges
+                WHERE from_node = %s AND to_node = %s AND route_id IS NULL
+            )
+        """,
+            (
+                b_id, a_id, travel_time, distance_km,
+                walk_speed_kmh, rev_bearing, congestion, walk_geom,
+                b_id, a_id,
+            ),
+        )
+        walking_edges_created += cur.rowcount
 
     conn.commit()
     print(f"Created {walking_edges_created} directed walking edges.")
@@ -484,11 +652,14 @@ def main():
     # ------------------------------------------------------------------
     cur.close()
     conn.close()
-    print("Graph building completed successfully.")
-    print(
-        f"Summary: {len(routes)} routes, {len(node_records)} nodes, "
-        f"{edges_created} bus edges, {walking_edges_created} walking edges"
-    )
+    print()
+    print("=" * 60)
+    print("  Graph building completed successfully.")
+    print(f"  Routes   : {len(routes)}")
+    print(f"  Nodes    : {len(node_records)}")
+    print(f"  Bus edges: {edges_created}")
+    print(f"  Walk edges: {walking_edges_created}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
