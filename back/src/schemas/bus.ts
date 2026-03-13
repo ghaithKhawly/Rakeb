@@ -64,6 +64,13 @@ export const getBusSchema = {
 };
 
 export const deleteBussesSchema = {
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      invalidateGraph: { type: "boolean", default: true },
+    },
+  },
   response: {
     200: {
       type: "object",
@@ -81,6 +88,7 @@ export const deleteBusSchema = {
     additionalProperties: false,
     properties: {
       id: { type: "integer", minimum: 1 },
+      invalidateGraph: { type: "boolean", default: true },
     },
   },
     response:{
@@ -88,4 +96,53 @@ export const deleteBusSchema = {
       type: "object",
       properties: {message: { type: "string" }},
     },}
-}
+};
+
+export const graphCacheQuerySchema = {
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      forceRefresh: { type: "boolean", default: false },
+    },
+  },
+};
+
+export const getGraphSchema = {
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      forceRefresh: { type: "boolean", default: false },
+      includeRoutes: { type: "boolean", default: true },
+      includeNodes: { type: "boolean", default: true },
+      includeEdges: { type: "boolean", default: true },
+      includeRouteNodes: { type: "boolean", default: true },
+    },
+  },
+};
+
+export const invalidateGraphSchema = {
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      rebuild: { type: "boolean", default: true },
+      wait: { type: "boolean", default: false },
+    },
+  },
+  response: {
+    202: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+    },
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+    },
+  },
+};

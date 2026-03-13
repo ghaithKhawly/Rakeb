@@ -3,11 +3,24 @@ import { navigationRouteSchema } from "../schemas/navigation";
 import {
   deleteBussesSchema,
   deleteBusSchema,
+  graphCacheQuerySchema,
+  getGraphSchema,
   getBusSchema,
   getBussesSchema,
+  invalidateGraphSchema,
 } from "../schemas/bus";
 import type { LocationDTO } from "../../../types/location";
-import type { DeleteBusQuery, GetBusQuery, GetBusesQuery } from "../../../types/bus";
+import type {
+  DeleteBusesQuery,
+  DeleteBusQuery,
+  GetBusQuery,
+  GetBusesQuery,
+  GetGraphQuery,
+  GraphCacheQuery,
+  InvalidateGraphQuery,
+} from "../../../types/bus";
+import { graphCache } from "../services/graphCache";
+import { routingWorkerClient } from "../services/routingWorkerClient";
 export async function busRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/navigation/route",
@@ -16,18 +29,82 @@ export async function busRoutes(fastify: FastifyInstance) {
       schema: navigationRouteSchema,
     },
     async (request, reply) => {
+      const snapshot = await graphCache.getSnapshot(fastify);
       const { from, to } = request.body as {  
         from:LocationDTO;
         to:LocationDTO ;
       };
 
-      return {
+      return routingWorkerClient.route({
         from,
         to,
-        message: "Routing not implemented yet",
-      };
+        graphLoadedAt: snapshot.loadedAt,
+      });
     },
   );
+
+  fastify.get(
+    "/graph/cache",
+    {
+      preHandler: [fastify.authenticate],
+      schema: graphCacheQuerySchema,
+    },
+    async (request, reply) => {
+      const query = request.query as GraphCacheQuery;
+      await graphCache.getSnapshot(fastify, query.forceRefresh ?? false);
+      return graphCache.getStatus();
+    },
+  );
+
+  fastify.post(
+    "/graph/invalidate",
+    {
+      preHandler: [fastify.authenticate],
+      schema: invalidateGraphSchema,
+    },
+    async (request, reply) => {
+      const query = request.query as InvalidateGraphQuery;
+      const rebuild = query.rebuild ?? true;
+      const wait = query.wait ?? false;
+
+      if (!rebuild) {
+        graphCache.invalidate();
+        return { message: "Graph cache invalidated" };
+      }
+
+      if (wait) {
+        await graphCache.invalidateAndRebuild(fastify, true);
+        return { message: "Graph invalidated, rebuilt, and cache refreshed" };
+      }
+
+      void graphCache.invalidateAndRebuild(fastify, false);
+      return reply.code(202).send({ message: "Graph invalidated; rebuild started in background" });
+    },
+  );
+
+  fastify.get(
+    "/graph",
+    {
+      preHandler: [fastify.authenticate],
+      schema: getGraphSchema,
+    },
+    async (request, reply) => {
+      const query = request.query as GetGraphQuery;
+      const snapshot = await graphCache.getSnapshot(fastify, query.forceRefresh ?? false);
+
+      const graph = {
+        loadedAt: snapshot.loadedAt,
+        routes: query.includeRoutes === false ? [] : snapshot.routes,
+        nodes: query.includeNodes === false ? [] : snapshot.nodes,
+        edges: query.includeEdges === false ? [] : snapshot.edges,
+        routeNodes: query.includeRouteNodes === false ? [] : snapshot.routeNodes,
+      };
+
+      reply.header("x-graph-loaded-at", snapshot.loadedAt);
+      return graph;
+    },
+  );
+
   fastify.get(
     "/busses",
     {
@@ -121,6 +198,9 @@ export async function busRoutes(fastify: FastifyInstance) {
       const query = request.query as DeleteBusQuery;
       try {
         await client.query("DELETE FROM routes WHERE type = $1 AND id = $2", ["bus", query.id]);
+        if (query.invalidateGraph ?? true) {
+          graphCache.invalidate();
+        }
         return {
           message: "Bus deleted successfully",
         };
@@ -137,8 +217,12 @@ export async function busRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const client = await fastify.pg.connect();
+      const query = request.query as DeleteBusesQuery;
       try {
         await client.query("DELETE FROM routes WHERE type = $1 ", ["bus"]);
+        if (query.invalidateGraph ?? true) {
+          graphCache.invalidate();
+        }
         return {
           message: "Busses deleted successfully",
         };

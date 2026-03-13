@@ -25,4 +25,26 @@ export type GetBusQuery = {
 };
 export type DeleteBusQuery = {
   id: number;
+  invalidateGraph?: boolean;
+};
+
+export type DeleteBusesQuery = {
+  invalidateGraph?: boolean;
+};
+
+export type GraphCacheQuery = {
+  forceRefresh?: boolean;
+};
+
+export type GetGraphQuery = {
+  forceRefresh?: boolean;
+  includeRoutes?: boolean;
+  includeNodes?: boolean;
+  includeEdges?: boolean;
+  includeRouteNodes?: boolean;
+};
+
+export type InvalidateGraphQuery = {
+  rebuild?: boolean;
+  wait?: boolean;
 };

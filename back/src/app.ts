@@ -6,6 +6,7 @@ import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
 import { authRoutes } from "./routes/authRoutes";
 import { busRoutes } from "./routes/busRoutes";
+import { graphCache } from "./services/graphCache";
 export const app = Fastify({
   logger: true,
 });
@@ -31,6 +32,13 @@ export async function buildApp() {
   
   await app.register(jwtPlugin);
    await setupDatabase(app);
+
+  try {
+    await graphCache.warmup(app);
+    app.log.info("Graph cache warmed up at startup");
+  } catch (error) {
+    app.log.error({ error }, "Graph cache warmup failed; it will lazy-load on first request");
+  }
 
   await app.register(swagger, {
     openapi: {
