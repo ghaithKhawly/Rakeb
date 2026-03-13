@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-KMZ → Graph Builder for Syrian Public Transit
+KMZ ΓåÆ Graph Builder for Syrian Public Transit
 - Reads KMZ files, extracts bus routes.
 - Places nodes at:
     * route intersections (one node)
@@ -50,7 +50,7 @@ def parse_coordinates(coord_string):
     return points
 
 # ----------------------------------------------------------------------
-# Helper: great‑circle distance (meters)
+# Helper: greatΓÇæcircle distance (meters)
 # ----------------------------------------------------------------------
 def haversine(lon1, lat1, lon2, lat2):
     R = 6371000
@@ -122,7 +122,7 @@ def main():
                         continue
 
                     original = LineString(raw_coords)
-                    # Simplify: tolerance ~0.0005 deg ≈ 55m (adjust as needed)
+                    # Simplify: tolerance ~0.0005 deg Γëê 55m (adjust as needed)
                     simplified = original.simplify(0.0005, preserve_topology=True)
                     routes.append({
                         'name': name,
@@ -176,7 +176,7 @@ def main():
             geom_j = routes[j]['geom_simplified']
             id_j = routes[j]['id']
 
-            # Quick bounding‑box filter (in degrees)
+            # Quick boundingΓÇæbox filter (in degrees)
             if geom_i.distance(geom_j) > TRANSFER_DIST_THRESHOLD / 111000:
                 continue
 
@@ -251,7 +251,7 @@ def main():
             INSERT INTO nodes (latitude, longitude)
             VALUES (%s, %s)
             RETURNING id
-        """, (float(lat), float(lon)))   # ← cast to float
+        """, (float(lat), float(lon)))   # ΓåÉ cast to float
         node_id = cur.fetchone()[0]
         node_records.append({
             'id': node_id,
@@ -334,7 +334,7 @@ def main():
             if f1 >= f2:
                 continue
 
-            # Extract sub‑linestring between f1 and f2
+            # Extract subΓÇælinestring between f1 and f2
             try:
                 sub_geom = substring(route_geom, f1 * route_geom.length, f2 * route_geom.length)
             except Exception:
@@ -368,7 +368,7 @@ def main():
     print(f"Created {edges_created} directed route edges.")
 
     # ------------------------------------------------------------------
-    # 10. Add walking edges between nearby nodes (straight‑line)
+    # 10. Add walking edges between nearby nodes (straightΓÇæline)
     # ------------------------------------------------------------------
     print("Adding walking edges between nodes within 500m...")
     cur.execute("""

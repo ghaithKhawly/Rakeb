@@ -21,10 +21,45 @@ export async function setupDatabase(fastify: FastifyInstance) {
         id SERIAL PRIMARY KEY,
         latitude DOUBLE PRECISION NOT NULL,
         longitude DOUBLE PRECISION NOT NULL,
+        h3_cell VARCHAR(20),
         geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_nodes_geom ON nodes USING GIST (geom);
+      CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+    `);
+
+    // Add h3_cell column to existing nodes table if missing
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='nodes' AND column_name='h3_cell'
+        ) THEN
+          ALTER TABLE nodes ADD COLUMN h3_cell VARCHAR(20);
+          CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+        END IF;
+      END $$;
+    `);
+
+    // Add routing-metadata columns to nodes (safe migration)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='node_type') THEN
+          ALTER TABLE nodes ADD COLUMN node_type VARCHAR(20) DEFAULT 'single';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='route_count') THEN
+          ALTER TABLE nodes ADD COLUMN route_count INTEGER DEFAULT 1;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='is_transfer') THEN
+          ALTER TABLE nodes ADD COLUMN is_transfer BOOLEAN DEFAULT FALSE;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes (node_type);
     `);
 
     await client.query(`
@@ -75,6 +110,28 @@ export async function setupDatabase(fastify: FastifyInstance) {
       CREATE INDEX IF NOT EXISTS idx_edges_from_node ON edges(from_node);
       CREATE INDEX IF NOT EXISTS idx_edges_route_id ON edges(route_id);
       CREATE INDEX IF NOT EXISTS idx_edges_geom ON edges USING GIST (geom);
+    `);
+
+    // Add routing-metadata columns to edges (safe migration)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='edge_type') THEN
+          ALTER TABLE edges ADD COLUMN edge_type VARCHAR(10) DEFAULT 'bus';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='speed_kmh') THEN
+          ALTER TABLE edges ADD COLUMN speed_kmh DOUBLE PRECISION;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='bearing_deg') THEN
+          ALTER TABLE edges ADD COLUMN bearing_deg DOUBLE PRECISION;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='congestion_factor') THEN
+          ALTER TABLE edges ADD COLUMN congestion_factor DOUBLE PRECISION DEFAULT 1.0;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_edges_edge_type ON edges (edge_type);
     `);
 
     await client.query(`
