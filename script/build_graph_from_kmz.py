@@ -7,7 +7,7 @@ KMZ ΓåÆ Graph Builder for Syrian Public Transit
     * midpoints of closest points when routes are within 200m (one node)
     * route endpoints
 - Merges nearby nodes (10m tolerance).
-- Builds directed edges for each route and walking edges between nearby nodes.
+- Builds directed edges for each route.
 - Stores full route geometry in routes.geom.
 - Inserts all into PostgreSQL/PostGIS.
 """
@@ -31,10 +31,8 @@ from sklearn.cluster import DBSCAN
 # Constants
 # ----------------------------------------------------------------------
 AVG_BUS_SPEED_KMH = 25.0
-WALKING_SPEED_MS = 1.4
 TRANSFER_DIST_THRESHOLD = 200.0      # meters
 NODE_MERGE_TOLERANCE = 10.0          # meters
-WALKING_EDGE_MAX_DIST = 500.0        # meters
 ROUTE_ASSOCIATION_DIST = 150.0       # meters (for snapping nodes to routes)
 
 # ----------------------------------------------------------------------
@@ -87,6 +85,17 @@ def main():
     )
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    # ------------------------------------------------------------------
+    # 1b. Clear existing graph data so rebuild is always clean
+    # ------------------------------------------------------------------
+    print("Clearing existing graph tables...")
+    cur.execute("""
+        TRUNCATE TABLE edges, route_nodes, nodes, routes
+        RESTART IDENTITY CASCADE
+    """)
+    conn.commit()
+    print("Existing graph data cleared.")
 
     # ------------------------------------------------------------------
     # 2. Parse all KMZ files, extract routes and simplified geometries
@@ -367,28 +376,9 @@ def main():
     conn.commit()
     print(f"Created {edges_created} directed route edges.")
 
-    # ------------------------------------------------------------------
-    # 10. Add walking edges between nearby nodes (straightΓÇæline)
-    # ------------------------------------------------------------------
-    print("Adding walking edges between nodes within 500m...")
-    cur.execute("""
-        INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
-        SELECT a.id, b.id, NULL,
-               ST_Distance(a.geom::geography, b.geom::geography) / %s AS travel_time,
-               ST_Distance(a.geom::geography, b.geom::geography) / 1000.0 AS distance_km,
-               ST_MakeLine(a.geom, b.geom) AS geom
-        FROM nodes a, nodes b
-        WHERE a.id < b.id
-          AND ST_DWithin(a.geom::geography, b.geom::geography, %s)
-        ON CONFLICT (from_node, to_node, route_id) DO NOTHING
-    """, (WALKING_SPEED_MS, WALKING_EDGE_MAX_DIST))
-    walking_count = cur.rowcount
-    conn.commit()
-    print(f"Added {walking_count} walking edges.")
-
-    # ------------------------------------------------------------------
-    # 11. Done
-    # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # 10. Done
+        # ------------------------------------------------------------------
     cur.close()
     conn.close()
     print("Graph building completed successfully.")
