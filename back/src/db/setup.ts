@@ -2,9 +2,10 @@ import { FastifyInstance } from "fastify";
 
 export async function setupDatabase(fastify: FastifyInstance) {
   const client = await fastify.pg.connect();
-  
+  console.log("Setting up database...");
   try {
-    // Create users table
+    await client.query(`CREATE EXTENSION IF NOT EXISTS postgis;`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -12,9 +13,167 @@ export async function setupDatabase(fastify: FastifyInstance) {
         password_hash VARCHAR(255) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+      );
     `);
-    
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS nodes (
+        id SERIAL PRIMARY KEY,
+        latitude DOUBLE PRECISION NOT NULL,
+        longitude DOUBLE PRECISION NOT NULL,
+        h3_cell VARCHAR(20),
+        geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) STORED,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_nodes_geom ON nodes USING GIST (geom);
+      CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+    `);
+
+    // Add h3_cell column to existing nodes table if missing
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='nodes' AND column_name='h3_cell'
+        ) THEN
+          ALTER TABLE nodes ADD COLUMN h3_cell VARCHAR(20);
+          CREATE INDEX IF NOT EXISTS idx_nodes_h3_cell ON nodes (h3_cell);
+        END IF;
+      END $$;
+    `);
+
+    // Add routing-metadata columns to nodes (safe migration)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='node_type') THEN
+          ALTER TABLE nodes ADD COLUMN node_type VARCHAR(20) DEFAULT 'single';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='route_count') THEN
+          ALTER TABLE nodes ADD COLUMN route_count INTEGER DEFAULT 1;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='nodes' AND column_name='is_transfer') THEN
+          ALTER TABLE nodes ADD COLUMN is_transfer BOOLEAN DEFAULT FALSE;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes (node_type);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS routes (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        type VARCHAR(20) DEFAULT 'bus',
+        avg_speed_kmh DOUBLE PRECISION,
+        base_price INTEGER,
+        frequency_minutes INTEGER,
+        crowding_tendency VARCHAR(10) DEFAULT 'medium',
+        geom GEOMETRY(LINESTRING, 4326),          -- full route geometry for display
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+   
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='routes' AND column_name='geom'
+        ) THEN
+          ALTER TABLE routes ADD COLUMN geom GEOMETRY(LINESTRING, 4326);
+        END IF;
+      END $$;
+    `);
+
+    // Spatial index on routes.geom
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_routes_geom ON routes USING GIST (geom);
+    `);
+
+    // Edges table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS edges (
+        id SERIAL PRIMARY KEY,
+        from_node INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+        to_node INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+        route_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+        travel_time DOUBLE PRECISION NOT NULL,
+        distance_km DOUBLE PRECISION NOT NULL,
+        geom GEOMETRY(LINESTRING, 4326),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (from_node, to_node, route_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_edges_from_node ON edges(from_node);
+      CREATE INDEX IF NOT EXISTS idx_edges_route_id ON edges(route_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_geom ON edges USING GIST (geom);
+    `);
+
+    // Add routing-metadata columns to edges (safe migration)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='edge_type') THEN
+          ALTER TABLE edges ADD COLUMN edge_type VARCHAR(10) DEFAULT 'bus';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='speed_kmh') THEN
+          ALTER TABLE edges ADD COLUMN speed_kmh DOUBLE PRECISION;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='bearing_deg') THEN
+          ALTER TABLE edges ADD COLUMN bearing_deg DOUBLE PRECISION;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='edges' AND column_name='congestion_factor') THEN
+          ALTER TABLE edges ADD COLUMN congestion_factor DOUBLE PRECISION DEFAULT 1.0;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_edges_edge_type ON edges (edge_type);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS route_nodes (
+        route_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+        node_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
+        sequence_order INTEGER NOT NULL,
+        PRIMARY KEY (route_id, sequence_order)
+      );
+      CREATE INDEX IF NOT EXISTS idx_route_nodes_node_id ON route_nodes(node_id);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS travel_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        origin_lat DOUBLE PRECISION NOT NULL,
+        origin_lng DOUBLE PRECISION NOT NULL,
+        origin_geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (
+          ST_SetSRID(ST_MakePoint(origin_lng, origin_lat), 4326)
+        ) STORED,
+        dest_lat DOUBLE PRECISION NOT NULL,
+        dest_lng DOUBLE PRECISION NOT NULL,
+        dest_geom GEOMETRY(POINT, 4326) GENERATED ALWAYS AS (
+          ST_SetSRID(ST_MakePoint(dest_lng, dest_lat), 4326)
+        ) STORED,
+        origin_label VARCHAR(100),
+        dest_label VARCHAR(100),
+        route_ids INTEGER[],
+        transfer_count INTEGER DEFAULT 0,
+        total_distance_m DOUBLE PRECISION,
+        total_duration_seconds DOUBLE PRECISION,
+        day_of_week SMALLINT NOT NULL,
+        hour_of_day SMALLINT NOT NULL,
+        traveled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_travel_history_user ON travel_history(user_id);
+      CREATE INDEX IF NOT EXISTS idx_travel_history_user_time ON travel_history(user_id, day_of_week, hour_of_day);
+      CREATE INDEX IF NOT EXISTS idx_travel_history_origin ON travel_history USING GIST (origin_geom);
+      CREATE INDEX IF NOT EXISTS idx_travel_history_dest ON travel_history USING GIST (dest_geom);
+    `);
+
     console.log("✅ Database tables created/verified");
   } catch (error) {
     console.error("❌ Database setup error:", error);

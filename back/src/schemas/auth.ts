@@ -2,9 +2,10 @@ export const registerSchema = {
   body: {
     type: "object",
     required: ["username", "password"],
+    additionalProperties: false,
     properties: {
       username: { type: "string", minLength: 3, maxLength: 50 },
-      password: { type: "string", minLength: 6 }
+      password: { type: "string", minLength: 6, maxLength: 100 }
     }
   },
   response: {
@@ -21,6 +22,12 @@ export const registerSchema = {
       properties: {
         error: { type: "string" }
       }
+    },
+    500: {
+      type: "object",
+      properties: {
+        error: { type: "string" }
+      }
     }
   }
 };
@@ -29,9 +36,10 @@ export const loginSchema = {
   body: {
     type: "object",
     required: ["username", "password"],
+    additionalProperties: false,
     properties: {
-      username: { type: "string" },
-      password: { type: "string" }
+      username: { type: "string", minLength: 3, maxLength: 50 },
+      password: { type: "string", minLength: 6, maxLength: 100 }
     }
   },
   response: {
@@ -50,6 +58,12 @@ export const loginSchema = {
       }
     },
     401: {
+      type: "object",
+      properties: {
+        error: { type: "string" }
+      }
+    },
+    500: {
       type: "object",
       properties: {
         error: { type: "string" }
