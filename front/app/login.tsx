@@ -39,7 +39,6 @@ export default function Login() {
 
       const { token, user } = response.data;
 
-      // Use the signIn method from context which handles storage and navigation
       await signIn(token, user);
 
       Alert.alert("Success", "Logged in successfully");

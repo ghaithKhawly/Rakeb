@@ -5,8 +5,8 @@ import { Sidebar } from '@/components/Sidebar';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { StatCard } from '@/components/StatCard';
 import { RoutePlannerWidget } from '@/components/RoutePlannerWidget';
-import { LiveTransitFeed } from '@/components/LiveTransitFeed';
 import { ThemedText } from '@/components/themed-text';
+import { CollapsibleMapWidget } from '@/components/CollapsibleMapWidget';
 
 export default function HomeScreen() {
   const isWeb = Platform.OS === 'web';
@@ -69,36 +69,7 @@ export default function HomeScreen() {
 
               <View style={styles.dashboardGrid}>
                 <View style={styles.leftColumn}>
-                    <View style={styles.chartPlaceholder}>
-                        <View style={styles.chartHeader}>
-                            <ThemedText type="defaultSemiBold">Network Performance</ThemedText>
-                            <View style={styles.chartLegend}>
-                                <View style={styles.legendWrapper}>
-                                    <View style={[styles.legendItem, { backgroundColor: Colors.dark.primary }]} />
-                                    <ThemedText style={styles.legendText}>Riders</ThemedText>
-                                </View>
-                                <View style={styles.legendWrapper}>
-                                    <View style={[styles.legendItem, { backgroundColor: '#3B82F6' }]} />
-                                    <ThemedText style={styles.legendText}>On-Time %</ThemedText>
-                                </View>
-                            </View>
-                        </View>
-                        {/* Simplified line chart visual using borders/circles for concept */}
-                        <View style={styles.chartVisual}>
-                             <View style={styles.chartGridLine} />
-                             <View style={styles.chartGridLine} />
-                             <View style={styles.chartGridLine} />
-                             
-                             <View style={styles.waveContainer}>
-                                <View style={styles.chartLine} />
-                                <View style={styles.chartPoint} />
-                             </View>
-                        </View>
-                    </View>
-                    
-                    <View style={styles.feedSection}>
-                        <LiveTransitFeed />
-                    </View>
+                    <CollapsibleMapWidget />
                 </View>
 
                 <View style={styles.rightColumn}>
@@ -237,9 +208,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 10,
     marginTop: -7, // Half of height + half of line height
-  },
-  feedSection: {
-    flex: 1,
   },
   infoCard: {
     backgroundColor: 'rgba(59, 130, 246, 0.05)',

@@ -2,18 +2,23 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "baseUrl": ".",  // ← ADD THIS
+    "baseUrl": ".", // ← ADD THIS
     "paths": {
-      "@/*": ["./*"],
-      "@types/*": ["../types/*"]  // ← ADD THIS FOR SHARED TYPES
+      "@/*": [
+        "./*"
+      ],
+      "@types/*": [
+        "../types/*"
+      ] // ← ADD THIS FOR SHARED TYPES
     }
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx", 
+    "**/*.tsx",
+    "**/*.d.ts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
-    "../types/**/*.ts",  // ← ADD THIS LINE
-    "../types/**/*.tsx"   // ← ADD THIS LINE
+    "../types/**/*.ts", // ← ADD THIS LINE
+    "../types/**/*.tsx" // ← ADD THIS LINE
   ]
 }
