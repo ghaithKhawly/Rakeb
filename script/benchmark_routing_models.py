@@ -14,7 +14,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, substring
 from sklearn.cluster import DBSCAN
 
-BASE_WALK_MAX = 100000.0
+BASE_WALK_MAX = 2000.0
 WALK_SPEED_MS = 1.4
 BUS_AVG_SPEED_KMH = 25.0
 BUS_MAX_SPEED_MS = BUS_AVG_SPEED_KMH * 1000.0 / 3600.0
@@ -337,7 +337,7 @@ def run_trials(node_ids, node_coords, bus_adj, walk_adj_pre, grid, cell_deg, n_t
             t = random.choice(node_ids)
         pairs.append((s, t))
 
-    prefs = [100.0, 300.0, 500.0,1000.0, 2000.0, 5000.0, 10000.0,20000.0, 50000.0, 100000.0]
+    prefs = [100.0, 300.0, 500.0,1000.0, 2000.0]
     results = []
 
     for pref in prefs:

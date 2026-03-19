@@ -48,3 +48,21 @@ export type InvalidateGraphQuery = {
   rebuild?: boolean;
   wait?: boolean;
 };
+
+export type SubmitBusFeedbackBody = {
+  routeId: number;
+  reportedPrice?: number;
+  crowdingLevel?: number;
+  slownessLevel?: number;
+  comment?: string;
+};
+
+export type GetBusFeedbackSummaryQuery = {
+  routeId: number;
+  days?: number;
+};
+
+export type GetRouteLiveMetricsQuery = {
+  routeId?: number;
+  refresh?: boolean;
+};

@@ -174,6 +174,63 @@ export async function setupDatabase(fastify: FastifyInstance) {
       CREATE INDEX IF NOT EXISTS idx_travel_history_dest ON travel_history USING GIST (dest_geom);
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS bus_feedback_reports (
+        id SERIAL PRIMARY KEY,
+        route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        reported_price NUMERIC(10, 2),
+        crowding_level SMALLINT,
+        slowness_level SMALLINT,
+        comment TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CHECK (crowding_level IS NULL OR (crowding_level >= 1 AND crowding_level <= 5)),
+        CHECK (slowness_level IS NULL OR (slowness_level >= 1 AND slowness_level <= 5))
+      );
+      CREATE INDEX IF NOT EXISTS idx_bus_feedback_route_time ON bus_feedback_reports(route_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_bus_feedback_user_time ON bus_feedback_reports(user_id, created_at DESC);
+    `);
+
+    // Keep only the latest report per (route_id, user_id), then enforce uniqueness.
+    await client.query(`
+      WITH ranked AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY route_id, user_id
+            ORDER BY created_at DESC, id DESC
+          ) AS rn
+        FROM bus_feedback_reports
+      )
+      DELETE FROM bus_feedback_reports b
+      USING ranked r
+      WHERE b.id = r.id
+        AND r.rn > 1;
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_bus_feedback_route_user
+      ON bus_feedback_reports(route_id, user_id);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS route_live_metrics (
+        route_id INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
+        reports_count INTEGER NOT NULL DEFAULT 0,
+        confidence_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+        avg_reported_price DOUBLE PRECISION,
+        avg_crowding_level DOUBLE PRECISION,
+        avg_slowness_level DOUBLE PRECISION,
+        effective_price DOUBLE PRECISION,
+        effective_crowding_score DOUBLE PRECISION,
+        effective_slowness_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+        suggested_avg_speed_kmh DOUBLE PRECISION,
+        last_report_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_route_live_metrics_updated_at ON route_live_metrics(updated_at DESC);
+    `);
+
     console.log("✅ Database tables created/verified");
   } catch (error) {
     console.error("❌ Database setup error:", error);

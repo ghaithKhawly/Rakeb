@@ -146,3 +146,118 @@ export const invalidateGraphSchema = {
     },
   },
 };
+
+export const submitBusFeedbackSchema = {
+  body: {
+    type: "object",
+    required: ["routeId"],
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+      reportedPrice: { type: "number", minimum: 0 },
+      crowdingLevel: { type: "integer", minimum: 1, maximum: 5 },
+      slownessLevel: { type: "integer", minimum: 1, maximum: 5 },
+      comment: { type: "string", minLength: 1, maxLength: 500 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        reportId: { type: "integer" },
+      },
+    },
+    201: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        reportId: { type: "integer" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    400: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    404: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
+export const getBusFeedbackSummarySchema = {
+  querystring: {
+    type: "object",
+    required: ["routeId"],
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+      days: { type: "integer", minimum: 1, maximum: 365, default: 30 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        routeId: { type: "integer" },
+        windowDays: { type: "integer" },
+        reportsCount: { type: "integer" },
+        avgPrice: { type: ["number", "null"] },
+        avgCrowdingLevel: { type: ["number", "null"] },
+        avgSlownessLevel: { type: ["number", "null"] },
+        crowdingTendency: { type: ["string", "null"] },
+        speedMultiplierSuggestion: { type: ["number", "null"] },
+        lastReportAt: { type: ["string", "null"] },
+      },
+    },
+  },
+};
+
+export const getRouteLiveMetricsSchema = {
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+      refresh: { type: "boolean", default: true },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        metrics: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              routeId: { type: "integer" },
+              reportsCount: { type: "integer" },
+              confidenceScore: { type: "number" },
+              avgReportedPrice: { type: ["number", "null"] },
+              avgCrowdingLevel: { type: ["number", "null"] },
+              avgSlownessLevel: { type: ["number", "null"] },
+              effectivePrice: { type: ["number", "null"] },
+              effectiveCrowdingScore: { type: ["number", "null"] },
+              effectiveSlownessMultiplier: { type: "number" },
+              suggestedAvgSpeedKmh: { type: ["number", "null"] },
+              lastReportAt: { type: ["string", "null"] },
+              updatedAt: { type: ["string", "null"] },
+            },
+          },
+        },
+      },
+    },
+  },
+};
