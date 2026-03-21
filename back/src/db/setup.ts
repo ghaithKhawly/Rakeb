@@ -68,12 +68,27 @@ export async function setupDatabase(fastify: FastifyInstance) {
         name TEXT NOT NULL,
         type VARCHAR(20) DEFAULT 'bus',
         avg_speed_kmh DOUBLE PRECISION,
-        base_price INTEGER,
+        base_price INTEGER DEFAULT 3000,
         frequency_minutes INTEGER,
         crowding_tendency VARCHAR(10) DEFAULT 'medium',
         geom GEOMETRY(LINESTRING, 4326),          -- full route geometry for display
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Enforce updated defaults for existing installations too.
+    await client.query(`
+      ALTER TABLE routes
+      ALTER COLUMN base_price SET DEFAULT 3000,
+      ALTER COLUMN crowding_tendency SET DEFAULT 'medium';
+    `);
+
+    // Normalize existing rows so rebuilt/live data is consistent with requested defaults.
+    await client.query(`
+      UPDATE routes
+      SET
+        base_price = COALESCE(base_price, 3000),
+        crowding_tendency = COALESCE(crowding_tendency, 'medium');
     `);
 
    

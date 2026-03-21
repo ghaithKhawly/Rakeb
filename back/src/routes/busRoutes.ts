@@ -49,13 +49,6 @@ async function refreshRouteLiveMetrics(
     base AS (
       SELECT
         r.id AS route_id,
-        r.base_price::float8 AS route_base_price,
-        r.avg_speed_kmh::float8 AS route_avg_speed_kmh,
-        CASE r.crowding_tendency
-          WHEN 'low' THEN 2.0
-          WHEN 'high' THEN 4.0
-          ELSE 3.0
-        END AS default_crowding_score,
         COALESCE(f.reports_count, 0) AS reports_count,
         f.avg_reported_price,
         f.avg_crowding_level,
@@ -88,24 +81,13 @@ async function refreshRouteLiveMetrics(
       b.avg_reported_price,
       b.avg_crowding_level,
       b.avg_slowness_level,
-      CASE
-        WHEN b.avg_reported_price IS NULL THEN b.route_base_price
-        WHEN b.route_base_price IS NULL THEN b.avg_reported_price
-        ELSE ((1.0 - b.confidence) * b.route_base_price) + (b.confidence * b.avg_reported_price)
-      END AS effective_price,
-      CASE
-        WHEN b.avg_crowding_level IS NULL THEN b.default_crowding_score
-        ELSE ((1.0 - b.confidence) * b.default_crowding_score) + (b.confidence * b.avg_crowding_level)
-      END AS effective_crowding_score,
+      b.avg_reported_price AS effective_price,
+      b.avg_crowding_level AS effective_crowding_score,
       CASE
         WHEN b.avg_slowness_level IS NULL THEN 1.0
         ELSE 1.0 + (((b.avg_slowness_level - 1.0) / 4.0) * 0.6)
       END AS effective_slowness_multiplier,
-      CASE
-        WHEN b.route_avg_speed_kmh IS NULL THEN NULL
-        WHEN b.avg_slowness_level IS NULL THEN b.route_avg_speed_kmh
-        ELSE b.route_avg_speed_kmh / (1.0 + (((b.avg_slowness_level - 1.0) / 4.0) * 0.6))
-      END AS suggested_avg_speed_kmh,
+      NULL::float8 AS suggested_avg_speed_kmh,
       b.last_report_at,
       NOW()
     FROM base b
