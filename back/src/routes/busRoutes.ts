@@ -12,7 +12,6 @@ import {
   invalidateGraphSchema,
   submitBusFeedbackSchema,
 } from "../schemas/bus";
-import type { LocationDTO } from "../../../types/location";
 import type {
   DeleteBusesQuery,
   DeleteBusQuery,
@@ -25,8 +24,122 @@ import type {
   InvalidateGraphQuery,
   SubmitBusFeedbackBody,
 } from "../../../types/bus";
+import type {
+  EffectiveRoutingConfig,
+  NavigationRouteRequestBody,
+  RouteLiveMetricForRouting,
+  RoutingPreferenceWeights,
+} from "../../../types/navigation";
 import { graphCache } from "../services/graphCache";
 import { routingWorkerClient } from "../services/routingWorkerClient";
+
+const DEFAULT_ROUTING_WEIGHTS: RoutingPreferenceWeights = {
+  speed: 1,
+  crowding: 1,
+  price: 1,
+  transfer: 1,
+  walking: 1,
+};
+
+const DEFAULT_ROUTING_CONFIG = {
+  maxWalkingDistanceM: 1000,
+  maxWalkingNeighbors: 12,
+  walkingSpeedMps: 1.25,
+};
+
+type UserRoutingPreferenceRow = {
+  speed_weight: number | null;
+  crowding_weight: number | null;
+  price_weight: number | null;
+  transfer_weight: number | null;
+  walking_weight: number | null;
+  max_walking_distance_m: number | null;
+  max_walking_neighbors: number | null;
+  walking_speed_mps: number | null;
+};
+
+function normalizeWeights(weights: RoutingPreferenceWeights): RoutingPreferenceWeights {
+  const raw = {
+    speed: Math.max(0, weights.speed),
+    crowding: Math.max(0, weights.crowding),
+    price: Math.max(0, weights.price),
+    transfer: Math.max(0, weights.transfer),
+    walking: Math.max(0, weights.walking),
+  };
+
+  const sum = raw.speed + raw.crowding + raw.price + raw.transfer + raw.walking;
+  if (sum <= 0) {
+    return {
+      speed: 0.2,
+      crowding: 0.2,
+      price: 0.2,
+      transfer: 0.2,
+      walking: 0.2,
+    };
+  }
+
+  return {
+    speed: raw.speed / sum,
+    crowding: raw.crowding / sum,
+    price: raw.price / sum,
+    transfer: raw.transfer / sum,
+    walking: raw.walking / sum,
+  };
+}
+
+async function getEffectiveRoutingConfig(
+  client: Awaited<ReturnType<FastifyInstance["pg"]["connect"]>>,
+  userId: number,
+  body: NavigationRouteRequestBody,
+): Promise<EffectiveRoutingConfig> {
+  const prefRes = await client.query(
+    `
+    SELECT
+      speed_weight,
+      crowding_weight,
+      price_weight,
+      transfer_weight,
+      walking_weight,
+      max_walking_distance_m,
+      max_walking_neighbors,
+      walking_speed_mps
+    FROM user_routing_preferences
+    WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  const stored = (prefRes.rows[0] as UserRoutingPreferenceRow | undefined) ?? null;
+
+  return {
+    weights: normalizeWeights({
+      speed: body.preferences?.speed
+        ?? stored?.speed_weight
+        ?? DEFAULT_ROUTING_WEIGHTS.speed,
+      crowding: body.preferences?.crowding
+        ?? stored?.crowding_weight
+        ?? DEFAULT_ROUTING_WEIGHTS.crowding,
+      price: body.preferences?.price
+        ?? stored?.price_weight
+        ?? DEFAULT_ROUTING_WEIGHTS.price,
+      transfer: body.preferences?.transfer
+        ?? stored?.transfer_weight
+        ?? DEFAULT_ROUTING_WEIGHTS.transfer,
+      walking: body.preferences?.walking
+        ?? stored?.walking_weight
+        ?? DEFAULT_ROUTING_WEIGHTS.walking,
+    }),
+    maxWalkingDistanceM: body.options?.maxWalkingDistanceM
+      ?? stored?.max_walking_distance_m
+      ?? DEFAULT_ROUTING_CONFIG.maxWalkingDistanceM,
+    maxWalkingNeighbors: body.options?.maxWalkingNeighbors
+      ?? stored?.max_walking_neighbors
+      ?? DEFAULT_ROUTING_CONFIG.maxWalkingNeighbors,
+    walkingSpeedMps: body.options?.walkingSpeedMps
+      ?? stored?.walking_speed_mps
+      ?? DEFAULT_ROUTING_CONFIG.walkingSpeedMps,
+  };
+}
 
 async function refreshRouteLiveMetrics(
   client: Awaited<ReturnType<FastifyInstance["pg"]["connect"]>>,
@@ -41,6 +154,7 @@ async function refreshRouteLiveMetrics(
         COUNT(*)::int AS reports_count,
         AVG(b.reported_price)::float8 AS avg_reported_price,
         AVG(b.crowding_level)::float8 AS avg_crowding_level,
+        AVG(b.speed_level)::float8 AS avg_speed_level,
         AVG(b.slowness_level)::float8 AS avg_slowness_level,
         MAX(b.created_at) AS last_report_at
       FROM bus_feedback_reports b
@@ -52,6 +166,7 @@ async function refreshRouteLiveMetrics(
         COALESCE(f.reports_count, 0) AS reports_count,
         f.avg_reported_price,
         f.avg_crowding_level,
+        f.avg_speed_level,
         f.avg_slowness_level,
         f.last_report_at,
         LEAST(1.0, COALESCE(f.reports_count, 0)::float8 / 20.0) AS confidence
@@ -66,8 +181,10 @@ async function refreshRouteLiveMetrics(
       confidence_score,
       avg_reported_price,
       avg_crowding_level,
+      avg_speed_level,
       avg_slowness_level,
       effective_price,
+      effective_speed_score,
       effective_crowding_score,
       effective_slowness_multiplier,
       suggested_avg_speed_kmh,
@@ -80,8 +197,10 @@ async function refreshRouteLiveMetrics(
       b.confidence,
       b.avg_reported_price,
       b.avg_crowding_level,
+      b.avg_speed_level,
       b.avg_slowness_level,
       b.avg_reported_price AS effective_price,
+      COALESCE(b.avg_speed_level, CASE WHEN b.avg_slowness_level IS NULL THEN NULL ELSE (6.0 - b.avg_slowness_level) END) AS effective_speed_score,
       b.avg_crowding_level AS effective_crowding_score,
       CASE
         WHEN b.avg_slowness_level IS NULL THEN 1.0
@@ -96,8 +215,10 @@ async function refreshRouteLiveMetrics(
           confidence_score = EXCLUDED.confidence_score,
           avg_reported_price = EXCLUDED.avg_reported_price,
           avg_crowding_level = EXCLUDED.avg_crowding_level,
+          avg_speed_level = EXCLUDED.avg_speed_level,
           avg_slowness_level = EXCLUDED.avg_slowness_level,
           effective_price = EXCLUDED.effective_price,
+          effective_speed_score = EXCLUDED.effective_speed_score,
           effective_crowding_score = EXCLUDED.effective_crowding_score,
           effective_slowness_multiplier = EXCLUDED.effective_slowness_multiplier,
           suggested_avg_speed_kmh = EXCLUDED.suggested_avg_speed_kmh,
@@ -117,16 +238,60 @@ export async function busRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const snapshot = await graphCache.getSnapshot(fastify);
-      const { from, to } = request.body as {  
-        from:LocationDTO;
-        to:LocationDTO ;
-      };
+      const body = request.body as NavigationRouteRequestBody;
+      const userPayload = request.user as { id?: number | string };
+      const userId = Number(userPayload?.id);
 
-      return routingWorkerClient.route({
-        from,
-        to,
-        graphLoadedAt: snapshot.loadedAt,
-      });
+      if (!Number.isFinite(userId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const client = await fastify.pg.connect();
+      try {
+        const metricsRes = await client.query<{
+          route_id: number;
+          effective_price: number | null;
+          effective_speed_score: number | null;
+          effective_crowding_score: number | null;
+          effective_slowness_multiplier: number | null;
+        }>(
+          `
+          SELECT
+            route_id,
+            effective_price,
+            effective_speed_score,
+            effective_crowding_score,
+            effective_slowness_multiplier
+          FROM route_live_metrics
+          `,
+        );
+
+        const routeMetrics: RouteLiveMetricForRouting[] = metricsRes.rows.map((row: {
+          route_id: number;
+          effective_price: number | null;
+          effective_speed_score: number | null;
+          effective_crowding_score: number | null;
+          effective_slowness_multiplier: number | null;
+        }) => ({
+          routeId: row.route_id,
+          effectivePrice: row.effective_price,
+          effectiveSpeedScore: row.effective_speed_score,
+          effectiveCrowdingScore: row.effective_crowding_score,
+          effectiveSlownessMultiplier: row.effective_slowness_multiplier,
+        }));
+
+        const config = await getEffectiveRoutingConfig(client, userId, body);
+
+        return routingWorkerClient.route({
+          from: body.from,
+          to: body.to,
+          graph: snapshot,
+          routeMetrics,
+          config,
+        });
+      } finally {
+        client.release();
+      }
     },
   );
 
@@ -292,12 +457,13 @@ export async function busRoutes(fastify: FastifyInstance) {
       const hasAnyMetric =
         typeof body.reportedPrice === "number"
         || typeof body.crowdingLevel === "number"
+        || typeof body.speedLevel === "number"
         || typeof body.slownessLevel === "number"
         || (typeof body.comment === "string" && body.comment.trim().length > 0);
 
       if (!hasAnyMetric) {
         return reply.code(400).send({
-          error: "At least one feedback value is required (price, crowding, slowness, or comment)",
+          error: "At least one feedback value is required (price, crowding, speed, slowness, or comment)",
         });
       }
 
@@ -315,13 +481,14 @@ export async function busRoutes(fastify: FastifyInstance) {
         const insertRes = await client.query(
           `
           INSERT INTO bus_feedback_reports
-            (route_id, user_id, reported_price, crowding_level, slowness_level, comment)
+            (route_id, user_id, reported_price, crowding_level, speed_level, slowness_level, comment)
           VALUES
-            ($1, $2, $3, $4, $5, $6)
+            ($1, $2, $3, $4, $5, $6, $7)
           ON CONFLICT (route_id, user_id)
           DO UPDATE SET
             reported_price = COALESCE(EXCLUDED.reported_price, bus_feedback_reports.reported_price),
             crowding_level = COALESCE(EXCLUDED.crowding_level, bus_feedback_reports.crowding_level),
+            speed_level = COALESCE(EXCLUDED.speed_level, bus_feedback_reports.speed_level),
             slowness_level = COALESCE(EXCLUDED.slowness_level, bus_feedback_reports.slowness_level),
             comment = COALESCE(EXCLUDED.comment, bus_feedback_reports.comment),
             created_at = CURRENT_TIMESTAMP
@@ -332,6 +499,7 @@ export async function busRoutes(fastify: FastifyInstance) {
             userId,
             body.reportedPrice ?? null,
             body.crowdingLevel ?? null,
+            body.speedLevel ?? null,
             body.slownessLevel ?? null,
             body.comment?.trim() || null,
           ],
@@ -371,8 +539,10 @@ export async function busRoutes(fastify: FastifyInstance) {
           confidence_score: number;
           avg_reported_price: number | null;
           avg_crowding_level: number | null;
+          avg_speed_level: number | null;
           avg_slowness_level: number | null;
           effective_price: number | null;
+          effective_speed_score: number | null;
           effective_crowding_score: number | null;
           effective_slowness_multiplier: number;
           suggested_avg_speed_kmh: number | null;
@@ -389,8 +559,10 @@ export async function busRoutes(fastify: FastifyInstance) {
             m.confidence_score,
             m.avg_reported_price,
             m.avg_crowding_level,
+            m.avg_speed_level,
             m.avg_slowness_level,
             m.effective_price,
+            m.effective_speed_score,
             m.effective_crowding_score,
             m.effective_slowness_multiplier,
             m.suggested_avg_speed_kmh,
@@ -410,8 +582,10 @@ export async function busRoutes(fastify: FastifyInstance) {
             confidenceScore: row.confidence_score,
             avgReportedPrice: row.avg_reported_price,
             avgCrowdingLevel: row.avg_crowding_level,
+            avgSpeedLevel: row.avg_speed_level,
             avgSlownessLevel: row.avg_slowness_level,
             effectivePrice: row.effective_price,
+            effectiveSpeedScore: row.effective_speed_score,
             effectiveCrowdingScore: row.effective_crowding_score,
             effectiveSlownessMultiplier: row.effective_slowness_multiplier,
             suggestedAvgSpeedKmh: row.suggested_avg_speed_kmh,
@@ -442,6 +616,7 @@ export async function busRoutes(fastify: FastifyInstance) {
             COUNT(*)::int AS reports_count,
             AVG(reported_price)::float8 AS avg_price,
             AVG(crowding_level)::float8 AS avg_crowding_level,
+            AVG(speed_level)::float8 AS avg_speed_level,
             AVG(slowness_level)::float8 AS avg_slowness_level,
             MAX(created_at) AS last_report_at
           FROM bus_feedback_reports
@@ -476,6 +651,7 @@ export async function busRoutes(fastify: FastifyInstance) {
           reportsCount: row.reports_count,
           avgPrice: row.avg_price,
           avgCrowdingLevel: row.avg_crowding_level,
+          avgSpeedLevel: row.avg_speed_level,
           avgSlownessLevel: row.avg_slowness_level,
           crowdingTendency,
           speedMultiplierSuggestion,

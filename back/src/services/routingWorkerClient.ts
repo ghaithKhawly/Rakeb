@@ -3,21 +3,13 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { LocationDTO } from "../../../types/location";
+import type {
+  NavigationRouteResult,
+  RoutingWorkerPayload,
+} from "../../../types/navigation";
 
-type RoutingPayload = {
-  from: LocationDTO;
-  to: LocationDTO;
-  graphLoadedAt: string | null;
-};
-
-type RoutingResult = {
-  from: LocationDTO;
-  to: LocationDTO;
-  message: string;
-  executedInWorker: true;
-  graphLoadedAt: string | null;
-};
+type RoutingPayload = RoutingWorkerPayload;
+type RoutingResult = NavigationRouteResult;
 
 type WorkerResponse = {
   id: number;

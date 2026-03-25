@@ -53,6 +53,7 @@ export type SubmitBusFeedbackBody = {
   routeId: number;
   reportedPrice?: number;
   crowdingLevel?: number;
+  speedLevel?: number;
   slownessLevel?: number;
   comment?: string;
 };
