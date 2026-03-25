@@ -13,6 +13,9 @@ export const busRouteSchema = {
 };
 
 export const getBussesSchema = {
+  tags: ["Bus"],
+  summary: "List bus routes",
+  operationId: "getBusRoutes",
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -42,6 +45,9 @@ export const getBussesSchema = {
 };
 
 export const getBusSchema = {
+  tags: ["Bus"],
+  summary: "Get bus route by id",
+  operationId: "getBusRouteById",
   querystring: {
     type: "object",
     required: ["id"],
@@ -64,6 +70,9 @@ export const getBusSchema = {
 };
 
 export const deleteBussesSchema = {
+  tags: ["Bus"],
+  summary: "Delete all bus routes",
+  operationId: "deleteAllBusRoutes",
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -82,6 +91,9 @@ export const deleteBussesSchema = {
 };
 
 export const deleteBusSchema = {
+  tags: ["Bus"],
+  summary: "Delete bus route by id",
+  operationId: "deleteBusRouteById",
   querystring: {
     type: "object",
     required: ["id"],
@@ -99,6 +111,9 @@ export const deleteBusSchema = {
 };
 
 export const graphCacheQuerySchema = {
+  tags: ["Graph"],
+  summary: "Get graph cache status",
+  operationId: "getGraphCacheStatus",
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -109,6 +124,9 @@ export const graphCacheQuerySchema = {
 };
 
 export const getGraphSchema = {
+  tags: ["Graph"],
+  summary: "Get graph snapshot",
+  operationId: "getGraphSnapshot",
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -123,6 +141,9 @@ export const getGraphSchema = {
 };
 
 export const invalidateGraphSchema = {
+  tags: ["Graph"],
+  summary: "Invalidate graph cache and optionally rebuild",
+  operationId: "invalidateGraphCache",
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -148,6 +169,9 @@ export const invalidateGraphSchema = {
 };
 
 export const submitBusFeedbackSchema = {
+  tags: ["Bus Feedback"],
+  summary: "Submit or update route feedback",
+  operationId: "submitBusFeedback",
   body: {
     type: "object",
     required: ["routeId"],
@@ -198,6 +222,9 @@ export const submitBusFeedbackSchema = {
 };
 
 export const getBusFeedbackSummarySchema = {
+  tags: ["Bus Feedback"],
+  summary: "Get feedback summary for a route",
+  operationId: "getBusFeedbackSummary",
   querystring: {
     type: "object",
     required: ["routeId"],
@@ -227,6 +254,9 @@ export const getBusFeedbackSummarySchema = {
 };
 
 export const getRouteLiveMetricsSchema = {
+  tags: ["Bus Feedback"],
+  summary: "Get routing live metrics",
+  operationId: "getRouteLiveMetrics",
   querystring: {
     type: "object",
     additionalProperties: false,

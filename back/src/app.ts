@@ -4,6 +4,7 @@ import jwtPlugin from "./plugins/jwt";
 import { setupDatabase } from "./db/setup";
 import swagger from "@fastify/swagger";
 import swaggerUI from "@fastify/swagger-ui";
+import cors from "@fastify/cors";
 import { authRoutes } from "./routes/authRoutes";
 import { busRoutes } from "./routes/busRoutes";
 import { graphCache } from "./services/graphCache";
@@ -28,6 +29,11 @@ export async function buildApp() {
 
     reply.send(error);
   });
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+  });
+
    await app.register(postgresPlugin);
   
   await app.register(jwtPlugin);

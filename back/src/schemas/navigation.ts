@@ -9,6 +9,9 @@ export const locationSchema = {
 };
 
 export const navigationRouteSchema = {
+  tags: ["Navigation"],
+  summary: "Compute best route",
+  operationId: "computeNavigationRoute",
   body: {
     type: "object",
     required: ["from", "to"],
