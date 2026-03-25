@@ -295,3 +295,93 @@ export const getRouteLiveMetricsSchema = {
     },
   },
 };
+
+export const getUserTravelHistorySchema = {
+  tags: ["Navigation"],
+  summary: "Get current user travel history",
+  operationId: "getUserTravelHistory",
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      limit: { type: "integer", minimum: 1, maximum: 200, default: 20 },
+      offset: { type: "integer", minimum: 0, default: 0 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        limit: { type: "integer" },
+        offset: { type: "integer" },
+        total: { type: "integer" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              originLat: { type: "number" },
+              originLng: { type: "number" },
+              destLat: { type: "number" },
+              destLng: { type: "number" },
+              originLabel: { type: ["string", "null"] },
+              destLabel: { type: ["string", "null"] },
+              routeIds: {
+                type: ["array", "null"],
+                items: { type: "integer" },
+              },
+              transferCount: { type: ["integer", "null"] },
+              totalDistanceM: { type: ["number", "null"] },
+              totalDurationSeconds: { type: ["number", "null"] },
+              dayOfWeek: { type: "integer" },
+              hourOfDay: { type: "integer" },
+              traveledAt: { type: ["string", "null"] },
+              pathfindingResult: { type: ["object", "null"], additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
+export const deleteUserTravelHistorySchema = {
+  tags: ["Navigation"],
+  summary: "Delete one travel history item for current user",
+  operationId: "deleteUserTravelHistory",
+  querystring: {
+    type: "object",
+    required: ["id"],
+    additionalProperties: false,
+    properties: {
+      id: { type: "integer", minimum: 1 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    404: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};

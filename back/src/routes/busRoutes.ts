@@ -1,11 +1,13 @@
 import { FastifyInstance } from "fastify";
 import { navigationRouteSchema } from "../schemas/navigation";
 import {
+  deleteUserTravelHistorySchema,
   deleteBussesSchema,
   deleteBusSchema,
   graphCacheQuerySchema,
   getBusFeedbackSummarySchema,
   getRouteLiveMetricsSchema,
+  getUserTravelHistorySchema,
   getGraphSchema,
   getBusSchema,
   getBussesSchema,
@@ -13,6 +15,7 @@ import {
   submitBusFeedbackSchema,
 } from "../schemas/bus";
 import type {
+  DeleteUserTravelHistoryQuery,
   DeleteBusesQuery,
   DeleteBusQuery,
   GetBusFeedbackSummaryQuery,
@@ -20,12 +23,14 @@ import type {
   GetBusesQuery,
   GetGraphQuery,
   GetRouteLiveMetricsQuery,
+  GetUserTravelHistoryQuery,
   GraphCacheQuery,
   InvalidateGraphQuery,
   SubmitBusFeedbackBody,
 } from "../../../types/bus";
 import type {
   EffectiveRoutingConfig,
+  NavigationRouteResult,
   NavigationRouteRequestBody,
   RouteLiveMetricForRouting,
   RoutingPreferenceWeights,
@@ -282,13 +287,218 @@ export async function busRoutes(fastify: FastifyInstance) {
 
         const config = await getEffectiveRoutingConfig(client, userId, body);
 
-        return routingWorkerClient.route({
+        const routeResult = await routingWorkerClient.route({
           from: body.from,
           to: body.to,
           graph: snapshot,
           routeMetrics,
           config,
         });
+
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const hourOfDay = now.getHours();
+        const routeIds = Array.from(
+          new Set(
+            routeResult.segments
+              .filter((segment) => segment.mode === "bus" && typeof segment.routeId === "number")
+              .map((segment) => segment.routeId as number),
+          ),
+        );
+        const totalDistanceM = routeResult.segments.reduce((sum, segment) => sum + segment.distanceM, 0);
+
+        try {
+          await client.query(
+            `
+            INSERT INTO travel_history (
+              user_id,
+              origin_lat,
+              origin_lng,
+              dest_lat,
+              dest_lng,
+              origin_label,
+              dest_label,
+              route_ids,
+              transfer_count,
+              total_distance_m,
+              total_duration_seconds,
+              pathfinding_result,
+              day_of_week,
+              hour_of_day,
+              traveled_at
+            )
+            VALUES (
+              $1, $2, $3, $4, $5, $6, $7,
+              $8, $9, $10, $11, $12::jsonb, $13, $14, $15
+            )
+            `,
+            [
+              userId,
+              body.from.lat,
+              body.from.lng,
+              body.to.lat,
+              body.to.lng,
+              body.from.label ?? null,
+              body.to.label ?? null,
+              routeIds.length > 0 ? routeIds : null,
+              routeResult.transferCount,
+              totalDistanceM,
+              routeResult.etaSeconds,
+              JSON.stringify(routeResult as NavigationRouteResult),
+              dayOfWeek,
+              hourOfDay,
+              now,
+            ],
+          );
+        } catch (historyError) {
+          fastify.log.warn({ error: historyError }, "Failed to persist navigation history entry");
+        }
+
+        return routeResult;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  fastify.get(
+    "/navigation/history",
+    {
+      preHandler: [fastify.authenticate],
+      schema: getUserTravelHistorySchema,
+    },
+    async (request, reply) => {
+      const query = request.query as GetUserTravelHistoryQuery;
+      const userPayload = request.user as { id?: number | string };
+      const userId = Number(userPayload?.id);
+
+      if (!Number.isFinite(userId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const limit = query.limit ?? 20;
+      const offset = query.offset ?? 0;
+
+      const client = await fastify.pg.connect();
+      try {
+        const countRes = await client.query<{ total: number }>(
+          "SELECT COUNT(*)::int AS total FROM travel_history WHERE user_id = $1",
+          [userId],
+        );
+
+        const rowsRes = await client.query<{
+          id: number;
+          origin_lat: number;
+          origin_lng: number;
+          dest_lat: number;
+          dest_lng: number;
+          origin_label: string | null;
+          dest_label: string | null;
+          route_ids: number[] | null;
+          transfer_count: number | null;
+          total_distance_m: number | null;
+          total_duration_seconds: number | null;
+          day_of_week: number;
+          hour_of_day: number;
+          traveled_at: string | null;
+          pathfinding_result: unknown;
+        }>(
+          `
+          SELECT
+            id,
+            origin_lat,
+            origin_lng,
+            dest_lat,
+            dest_lng,
+            origin_label,
+            dest_label,
+            route_ids,
+            transfer_count,
+            total_distance_m,
+            total_duration_seconds,
+            day_of_week,
+            hour_of_day,
+            traveled_at,
+            pathfinding_result
+          FROM travel_history
+          WHERE user_id = $1
+          ORDER BY traveled_at DESC, id DESC
+          LIMIT $2 OFFSET $3
+          `,
+          [userId, limit, offset],
+        );
+
+        return {
+          limit,
+          offset,
+          total: countRes.rows[0]?.total ?? 0,
+          items: rowsRes.rows.map((row: {
+            id: number;
+            origin_lat: number;
+            origin_lng: number;
+            dest_lat: number;
+            dest_lng: number;
+            origin_label: string | null;
+            dest_label: string | null;
+            route_ids: number[] | null;
+            transfer_count: number | null;
+            total_distance_m: number | null;
+            total_duration_seconds: number | null;
+            day_of_week: number;
+            hour_of_day: number;
+            traveled_at: string | null;
+            pathfinding_result: unknown;
+          }) => ({
+            id: row.id,
+            originLat: row.origin_lat,
+            originLng: row.origin_lng,
+            destLat: row.dest_lat,
+            destLng: row.dest_lng,
+            originLabel: row.origin_label,
+            destLabel: row.dest_label,
+            routeIds: row.route_ids,
+            transferCount: row.transfer_count,
+            totalDistanceM: row.total_distance_m,
+            totalDurationSeconds: row.total_duration_seconds,
+            dayOfWeek: row.day_of_week,
+            hourOfDay: row.hour_of_day,
+            traveledAt: row.traveled_at,
+            pathfindingResult: row.pathfinding_result,
+          })),
+        };
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  fastify.delete(
+    "/navigation/history",
+    {
+      preHandler: [fastify.authenticate],
+      schema: deleteUserTravelHistorySchema,
+    },
+    async (request, reply) => {
+      const query = request.query as DeleteUserTravelHistoryQuery;
+      const userPayload = request.user as { id?: number | string };
+      const userId = Number(userPayload?.id);
+
+      if (!Number.isFinite(userId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const client = await fastify.pg.connect();
+      try {
+        const result = await client.query(
+          "DELETE FROM travel_history WHERE id = $1 AND user_id = $2 RETURNING id",
+          [query.id, userId],
+        );
+
+        if (result.rows.length === 0) {
+          return reply.code(404).send({ error: "History entry not found" });
+        }
+
+        return { message: "History entry deleted successfully" };
       } finally {
         client.release();
       }

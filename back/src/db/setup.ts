@@ -179,6 +179,7 @@ export async function setupDatabase(fastify: FastifyInstance) {
         transfer_count INTEGER DEFAULT 0,
         total_distance_m DOUBLE PRECISION,
         total_duration_seconds DOUBLE PRECISION,
+        pathfinding_result JSONB,
         day_of_week SMALLINT NOT NULL,
         hour_of_day SMALLINT NOT NULL,
         traveled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -187,6 +188,18 @@ export async function setupDatabase(fastify: FastifyInstance) {
       CREATE INDEX IF NOT EXISTS idx_travel_history_user_time ON travel_history(user_id, day_of_week, hour_of_day);
       CREATE INDEX IF NOT EXISTS idx_travel_history_origin ON travel_history USING GIST (origin_geom);
       CREATE INDEX IF NOT EXISTS idx_travel_history_dest ON travel_history USING GIST (dest_geom);
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='travel_history' AND column_name='pathfinding_result'
+        ) THEN
+          ALTER TABLE travel_history ADD COLUMN pathfinding_result JSONB;
+        END IF;
+      END $$;
     `);
 
     await client.query(`

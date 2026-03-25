@@ -67,3 +67,12 @@ export type GetRouteLiveMetricsQuery = {
   routeId?: number;
   refresh?: boolean;
 };
+
+export type GetUserTravelHistoryQuery = {
+  limit?: number;
+  offset?: number;
+};
+
+export type DeleteUserTravelHistoryQuery = {
+  id: number;
+};
