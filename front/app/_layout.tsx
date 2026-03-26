@@ -37,7 +37,7 @@ function RootLayoutNav() {
       // Redirect to the home page if authenticated
       router.replace("/(tabs)");
     }
-  }, [user, segments, isLoading]);
+  }, [user, segments, isLoading, router]);
 
   if (isLoading) {
     return (
@@ -52,10 +52,7 @@ function RootLayoutNav() {
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="settings/routes"
-            options={{ headerShown: false }}
-          />
+          <Stack.Screen name="(settings)" options={{ headerShown: false }} />
           <Stack.Screen
             name="modal"
             options={{ presentation: "modal", title: "Modal" }}

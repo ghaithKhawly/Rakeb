@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import {
+  Alert,
   ActivityIndicator,
   ScrollView,
   StyleSheet,
@@ -16,6 +17,7 @@ import { useRouter } from "expo-router";
 import MapView, { Polyline, Region } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
+import * as Location from "expo-location";
 import JSZip from "jszip";
 import { kml as kmlToGeoJson } from "@tmcw/togeojson";
 import { DOMParser } from "@xmldom/xmldom";
@@ -23,6 +25,11 @@ import { DOMParser } from "@xmldom/xmldom";
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
 import publicRoutesKmz from "@/assets/map/public_routes.kmz";
+import {
+  useBusses,
+  useGraphCacheStatus,
+  useInvalidateGraphCacheMutation,
+} from "@/hooks/useBusApi";
 
 type MapCoordinate = {
   latitude: number;
@@ -106,7 +113,12 @@ function resolveRouteName(feature: any, index: number): string {
   const firstValid = possibleNames.find(
     (value) => typeof value === "string" && value.trim().length > 0,
   );
-  return firstValid ?? `Route ${index + 1}`;
+
+  if (!firstValid) {
+    return `Route ${index + 1}`;
+  }
+
+  return firstValid.replace(/\s+/g, " ").trim();
 }
 
 function deriveRegionFromPoints(points: MapCoordinate[]): Region {
@@ -157,15 +169,60 @@ function withAlpha(hexColor: string, alpha: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+function haversineDistanceM(a: MapCoordinate, b: MapCoordinate): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+function findNearestRouteName(
+  userPoint: MapCoordinate,
+  lines: RouteLine[],
+): string | null {
+  let nearestRoute: string | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const line of lines) {
+    for (const point of line.points) {
+      const distance = haversineDistanceM(userPoint, point);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        nearestRoute = line.name;
+      }
+    }
+  }
+
+  return nearestRoute;
+}
+
 export default function RoutesMapScreen() {
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
+  const {
+    data: graphStatus,
+    isLoading: graphLoading,
+    refetch: refetchGraphStatus,
+  } = useGraphCacheStatus();
+  const { data: bussesData, isLoading: bussesLoading } = useBusses({
+    limit: 500,
+    offset: 0,
+  });
+  const invalidateGraphMutation = useInvalidateGraphCacheMutation();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [routeLines, setRouteLines] = useState<RouteLine[]>([]);
   const [visibleRouteNames, setVisibleRouteNames] = useState<string[]>([]);
-  const [selectedRouteName, setSelectedRouteName] = useState<string | null>(null);
+  const [selectedRouteName, setSelectedRouteName] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     const loadKmz = async () => {
@@ -196,10 +253,16 @@ export default function RoutesMapScreen() {
         const geoJson = kmlToGeoJson(dom as unknown as Document) as any;
 
         const lines: RouteLine[] = [];
+        const routeNameMap = new Map<string, string>();
 
         if (Array.isArray(geoJson?.features)) {
           geoJson.features.forEach((feature: any, featureIndex: number) => {
-            const routeName = resolveRouteName(feature, featureIndex);
+            const routeNameRaw = resolveRouteName(feature, featureIndex);
+            const routeNameKey = routeNameRaw.toLocaleLowerCase();
+            const routeName = routeNameMap.get(routeNameKey) ?? routeNameRaw;
+            if (!routeNameMap.has(routeNameKey)) {
+              routeNameMap.set(routeNameKey, routeName);
+            }
             const featureLines = extractFeatureLines(feature);
 
             featureLines.forEach((linePoints, lineIndex) => {
@@ -223,7 +286,31 @@ export default function RoutesMapScreen() {
         );
 
         setRouteLines(lines);
-        setVisibleRouteNames(names);
+
+        let nearestRouteName: string | null = null;
+        try {
+          const permission = await Location.requestForegroundPermissionsAsync();
+          if (permission.status === "granted") {
+            const location = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            nearestRouteName = findNearestRouteName(
+              {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+              },
+              lines,
+            );
+          }
+        } catch {
+          nearestRouteName = null;
+        }
+
+        const initialActiveRoutes = nearestRouteName
+          ? [nearestRouteName]
+          : [names[0]];
+        setVisibleRouteNames(initialActiveRoutes.filter(Boolean));
+        setSelectedRouteName(initialActiveRoutes[0] ?? null);
       } catch (loadError) {
         const message =
           loadError instanceof Error
@@ -294,6 +381,10 @@ export default function RoutesMapScreen() {
   }, [selectedRouteName, visibleRouteNames]);
 
   const toggleRouteName = (name: string) => {
+    if (selectedRouteName === name) {
+      setSelectedRouteName(null);
+    }
+
     setVisibleRouteNames((previous) =>
       previous.includes(name)
         ? previous.filter((routeName) => routeName !== name)
@@ -310,7 +401,7 @@ export default function RoutesMapScreen() {
         mapType="standard"
         showsUserLocation
       >
-        {visibleLines.map((line) => (
+        {visibleLines.map((line) =>
           (() => {
             const baseColor = routeColorMap[line.name] ?? Colors.dark.primary;
             const isSelected = selectedRouteName === line.name;
@@ -326,14 +417,14 @@ export default function RoutesMapScreen() {
                 onPress={() => setSelectedRouteName(line.name)}
               />
             );
-          })()
-        ))}
+          })(),
+        )}
       </MapView>
 
       <View style={styles.topBar}>
         <TouchableOpacity
           style={styles.topButton}
-          onPress={() => router.back()}
+          onPress={() => router.push("/(tabs)/settings")}
           activeOpacity={0.8}
         >
           <Ionicons name="arrow-back" size={20} color={Colors.dark.text} />
@@ -350,12 +441,57 @@ export default function RoutesMapScreen() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.backendBadge}>
+        <View style={styles.badgeRow}>
+          <Ionicons
+            name="server-outline"
+            size={14}
+            color={Colors.dark.primary}
+          />
+          <ThemedText type="defaultSemiBold" style={styles.badgeTitle}>
+            Live Backend
+          </ThemedText>
+          <TouchableOpacity
+            style={styles.badgeRefresh}
+            onPress={async () => {
+              try {
+                await invalidateGraphMutation.mutateAsync({ rebuild: false });
+                await refetchGraphStatus();
+              } catch {
+                Alert.alert(
+                  "Backend error",
+                  "Could not refresh graph cache right now.",
+                );
+              }
+            }}
+            activeOpacity={0.8}
+            disabled={invalidateGraphMutation.isPending}
+          >
+            {invalidateGraphMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.dark.primary} />
+            ) : (
+              <Ionicons name="refresh" size={14} color={Colors.dark.primary} />
+            )}
+          </TouchableOpacity>
+        </View>
+        <ThemedText style={styles.badgeText}>
+          Graph loaded:{" "}
+          {graphLoading ? "..." : graphStatus?.isLoaded ? "yes" : "no"}
+        </ThemedText>
+        <ThemedText style={styles.badgeText}>
+          API routes: {bussesLoading ? "..." : (bussesData?.busses.length ?? 0)}
+        </ThemedText>
+      </View>
+
       {selectedRouteName && (
         <View style={styles.selectedRouteBadge}>
           <View
             style={[
               styles.selectedRouteDot,
-              { backgroundColor: routeColorMap[selectedRouteName] ?? Colors.dark.primary },
+              {
+                backgroundColor:
+                  routeColorMap[selectedRouteName] ?? Colors.dark.primary,
+              },
             ]}
           />
           <ThemedText type="defaultSemiBold" style={styles.selectedRouteText}>
@@ -429,7 +565,10 @@ export default function RoutesMapScreen() {
                   <View
                     style={[
                       styles.routeColorDot,
-                      { backgroundColor: routeColorMap[name] ?? Colors.dark.primary },
+                      {
+                        backgroundColor:
+                          routeColorMap[name] ?? Colors.dark.primary,
+                      },
                     ]}
                   />
                   <ThemedText
@@ -486,7 +625,7 @@ const styles = StyleSheet.create({
   },
   selectedRouteBadge: {
     position: "absolute",
-    top: 104,
+    top: 170,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
@@ -497,6 +636,43 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  backendBadge: {
+    position: "absolute",
+    top: 104,
+    left: 16,
+    right: 16,
+    backgroundColor: Colors.dark.surface,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  badgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  badgeTitle: {
+    color: Colors.dark.text,
+    fontSize: 12,
+    flex: 1,
+  },
+  badgeRefresh: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.dark.background,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+  },
+  badgeText: {
+    color: Colors.dark.icon,
+    fontSize: 11,
   },
   selectedRouteDot: {
     width: 10,

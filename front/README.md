@@ -1,50 +1,73 @@
-# Welcome to your Expo app 👋
+# Frontend Setup (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This app uses axios through `config/api.ts`. The backend base URL is read from `EXPO_PUBLIC_API_URL`.
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## 1) Install frontend dependencies
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## 2) Configure backend URL
 
-## Learn more
+`.env` is already created with a default value for local development:
 
-To learn more about developing your project with Expo, look at the following resources:
+```env
+EXPO_PUBLIC_API_URL=http://localhost:3000
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+If you run on a physical phone, change it to your PC LAN IP:
 
-## Join the community
+```env
+EXPO_PUBLIC_API_URL=http://YOUR_PC_LAN_IP:3000
+```
 
-Join our community of developers creating universal apps.
+Example:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```env
+EXPO_PUBLIC_API_URL=http://192.168.1.50:3000
+```
+
+## 3) Start backend (from `back/`)
+
+```bash
+npm install
+npm run dev
+```
+
+Expected health check:
+
+```bash
+curl http://localhost:3000/health
+```
+
+Should return JSON like:
+
+```json
+{ "status": "OK", "timestamp": "..." }
+```
+
+## 4) Start frontend
+
+```bash
+npx expo start -c
+```
+
+Use one of:
+
+- Web (`w`) -> usually works with `http://localhost:3000`
+- Android emulator -> `localhost` also works with current setup
+- Physical phone -> requires LAN IP in `.env`
+
+## 5) In-app verification
+
+Open Settings and check the `Backend Graph Cache` card:
+
+- It shows `API: ...` resolved URL.
+- If status keeps loading/failing, URL is likely wrong or backend is not running.
+
+## Common issues
+
+- Timeout errors: wrong IP or backend not running.
+- Works on web but not phone: use LAN IP in `.env` instead of `localhost`.
+- Firewall blocks phone access: allow inbound port `3000` on your machine.
