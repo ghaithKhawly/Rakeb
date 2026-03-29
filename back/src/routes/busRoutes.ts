@@ -33,10 +33,19 @@ import type {
   NavigationRouteResult,
   NavigationRouteRequestBody,
   RouteLiveMetricForRouting,
+  RoutingWorkerPayload,
   RoutingPreferenceWeights,
 } from "../../../types/navigation";
 import { graphCache } from "../services/graphCache";
 import { routingWorkerClient } from "../services/routingWorkerClient";
+import {
+  DEFAULT_MAX_BUS_TRANSFERS,
+  TRANSFER_EXP_COEFF,
+  TRANSFER_EXP_RATE,
+  WALK_EXP_COEFF,
+  WALK_EXP_SCALE_M,
+  WALK_LINEAR_COEFF,
+} from "../constants/routingConstants";
 
 const DEFAULT_ROUTING_WEIGHTS: RoutingPreferenceWeights = {
   speed: 1,
@@ -48,8 +57,15 @@ const DEFAULT_ROUTING_WEIGHTS: RoutingPreferenceWeights = {
 
 const DEFAULT_ROUTING_CONFIG = {
   maxWalkingDistanceM: 1000,
+  maxTotalWalkingDistanceM: 2000,
   maxWalkingNeighbors: 12,
+  maxBusTransfers: DEFAULT_MAX_BUS_TRANSFERS,
   walkingSpeedMps: 1.25,
+  walkLinearCoeff: WALK_LINEAR_COEFF,
+  walkExpCoeff: WALK_EXP_COEFF,
+  walkExpScaleM: WALK_EXP_SCALE_M,
+  transferExpCoeff: TRANSFER_EXP_COEFF,
+  transferExpRate: TRANSFER_EXP_RATE,
 };
 
 type UserRoutingPreferenceRow = {
@@ -59,8 +75,15 @@ type UserRoutingPreferenceRow = {
   transfer_weight: number | null;
   walking_weight: number | null;
   max_walking_distance_m: number | null;
+  max_total_walking_distance_m: number | null;
   max_walking_neighbors: number | null;
+  max_bus_transfers: number | null;
   walking_speed_mps: number | null;
+  walk_linear_coeff: number | null;
+  walk_exp_coeff: number | null;
+  walk_exp_scale_m: number | null;
+  transfer_exp_coeff: number | null;
+  transfer_exp_rate: number | null;
 };
 
 function normalizeWeights(weights: RoutingPreferenceWeights): RoutingPreferenceWeights {
@@ -92,6 +115,15 @@ function normalizeWeights(weights: RoutingPreferenceWeights): RoutingPreferenceW
   };
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function deriveDynamicMaxWalkingDistanceM(maxTotalWalkingDistanceM: number): number {
+  // Keep single-walk cap proportional to total budget while staying within API bounds.
+  return clampNumber(maxTotalWalkingDistanceM * 0.35, 300, 2000);
+}
+
 async function getEffectiveRoutingConfig(
   client: Awaited<ReturnType<FastifyInstance["pg"]["connect"]>>,
   userId: number,
@@ -106,8 +138,15 @@ async function getEffectiveRoutingConfig(
       transfer_weight,
       walking_weight,
       max_walking_distance_m,
+      max_total_walking_distance_m,
       max_walking_neighbors,
-      walking_speed_mps
+      walking_speed_mps,
+      max_bus_transfers,
+      walk_linear_coeff,
+      walk_exp_coeff,
+      walk_exp_scale_m,
+      transfer_exp_coeff,
+      transfer_exp_rate
     FROM user_routing_preferences
     WHERE user_id = $1
     `,
@@ -115,6 +154,23 @@ async function getEffectiveRoutingConfig(
   );
 
   const stored = (prefRes.rows[0] as UserRoutingPreferenceRow | undefined) ?? null;
+  const explicitTotalWalkingDistanceM = body.options?.maxTotalWalkingDistanceM
+    ?? stored?.max_total_walking_distance_m
+    ?? null;
+
+  const hasExplicitSingleWalkingCap = body.options?.maxWalkingDistanceM != null
+    || stored?.max_walking_distance_m != null;
+
+  const maxWalkingDistanceM = hasExplicitSingleWalkingCap
+    ? (body.options?.maxWalkingDistanceM
+      ?? stored?.max_walking_distance_m
+      ?? DEFAULT_ROUTING_CONFIG.maxWalkingDistanceM)
+    : deriveDynamicMaxWalkingDistanceM(
+      explicitTotalWalkingDistanceM ?? (DEFAULT_ROUTING_CONFIG.maxWalkingDistanceM * 2),
+    );
+
+  const maxTotalWalkingDistanceM = explicitTotalWalkingDistanceM
+    ?? (maxWalkingDistanceM * 2);
 
   return {
     weights: normalizeWeights({
@@ -134,15 +190,32 @@ async function getEffectiveRoutingConfig(
         ?? stored?.walking_weight
         ?? DEFAULT_ROUTING_WEIGHTS.walking,
     }),
-    maxWalkingDistanceM: body.options?.maxWalkingDistanceM
-      ?? stored?.max_walking_distance_m
-      ?? DEFAULT_ROUTING_CONFIG.maxWalkingDistanceM,
+    maxWalkingDistanceM,
+    maxTotalWalkingDistanceM,
     maxWalkingNeighbors: body.options?.maxWalkingNeighbors
       ?? stored?.max_walking_neighbors
       ?? DEFAULT_ROUTING_CONFIG.maxWalkingNeighbors,
+    maxBusTransfers: body.options?.maxBusTransfers
+      ?? stored?.max_bus_transfers
+      ?? DEFAULT_ROUTING_CONFIG.maxBusTransfers,
     walkingSpeedMps: body.options?.walkingSpeedMps
       ?? stored?.walking_speed_mps
       ?? DEFAULT_ROUTING_CONFIG.walkingSpeedMps,
+    walkLinearCoeff: body.options?.walkLinearCoeff
+      ?? stored?.walk_linear_coeff
+      ?? DEFAULT_ROUTING_CONFIG.walkLinearCoeff,
+    walkExpCoeff: body.options?.walkExpCoeff
+      ?? stored?.walk_exp_coeff
+      ?? DEFAULT_ROUTING_CONFIG.walkExpCoeff,
+    walkExpScaleM: body.options?.walkExpScaleM
+      ?? stored?.walk_exp_scale_m
+      ?? DEFAULT_ROUTING_CONFIG.walkExpScaleM,
+    transferExpCoeff: body.options?.transferExpCoeff
+      ?? stored?.transfer_exp_coeff
+      ?? DEFAULT_ROUTING_CONFIG.transferExpCoeff,
+    transferExpRate: body.options?.transferExpRate
+      ?? stored?.transfer_exp_rate
+      ?? DEFAULT_ROUTING_CONFIG.transferExpRate,
   };
 }
 
@@ -235,6 +308,69 @@ async function refreshRouteLiveMetrics(
 }
 
 export async function busRoutes(fastify: FastifyInstance) {
+  const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 2500);
+
+  async function routeWithFallback(payload: {
+    base: Omit<RoutingWorkerPayload, "walkingMode">;
+  }): Promise<NavigationRouteResult> {
+    const runAttempt = async (walkingMode: "dynamic" | "precomputed") => {
+      const startedAt = Date.now();
+      try {
+        const result = await routingWorkerClient.route(
+          { ...payload.base, walkingMode },
+          { timeoutMs: workerTimeoutMs },
+        );
+        fastify.log.info(
+          { walkingMode, elapsedMs: Date.now() - startedAt },
+          "Routing attempt succeeded",
+        );
+        return result;
+      } catch (error) {
+        fastify.log.warn(
+          {
+            walkingMode,
+            elapsedMs: Date.now() - startedAt,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "Routing attempt failed",
+        );
+        throw error;
+      }
+    };
+
+    // Attempt 1: dynamic walking
+    try {
+      const result = await runAttempt("dynamic");
+      return { ...result, bestEffort: false };
+    } catch (error) {
+      fastify.log.warn({ error }, "Dynamic walking routing failed, trying precomputed walking");
+    }
+
+    // Attempt 2: precomputed walking edges
+    try {
+      const result = await runAttempt("precomputed");
+      return { ...result, bestEffort: false };
+    } catch (error) {
+      fastify.log.warn({ error }, "Precomputed walking routing failed, trying relaxed best-effort route");
+    }
+
+    // Attempt 3: relaxed best-effort (loosen total walking + transfers)
+    const relaxedConfig: EffectiveRoutingConfig = {
+      ...payload.base.config,
+      maxTotalWalkingDistanceM: Number.MAX_SAFE_INTEGER,
+      maxBusTransfers: Math.max(payload.base.config.maxBusTransfers, 10),
+    };
+
+    const relaxedPayload: RoutingWorkerPayload = {
+      ...payload.base,
+      config: relaxedConfig,
+      walkingMode: "dynamic",
+    };
+
+    const result = await routingWorkerClient.route(relaxedPayload, { timeoutMs: workerTimeoutMs });
+    return { ...result, bestEffort: true };
+  }
+
   fastify.post(
     "/navigation/route",
     {
@@ -286,14 +422,64 @@ export async function busRoutes(fastify: FastifyInstance) {
         }));
 
         const config = await getEffectiveRoutingConfig(client, userId, body);
+        const configJson = JSON.stringify(config);
 
-        const routeResult = await routingWorkerClient.route({
-          from: body.from,
-          to: body.to,
-          graph: snapshot,
-          routeMetrics,
-          config,
-        });
+        const cachedRes = await client.query<{
+          graph_version: string | null;
+          pathfinding_result: NavigationRouteResult | null;
+        }>(
+          `
+          SELECT graph_version, pathfinding_result
+          FROM travel_history
+          WHERE user_id = $1
+            AND origin_lat = $2
+            AND origin_lng = $3
+            AND dest_lat = $4
+            AND dest_lng = $5
+            AND pathfinding_result IS NOT NULL
+          ORDER BY traveled_at DESC
+          LIMIT 1
+          `,
+          [
+            userId,
+            body.from.lat,
+            body.from.lng,
+            body.to.lat,
+            body.to.lng,
+          ],
+        );
+
+        const cached = cachedRes.rows[0] ?? null;
+        const cachedResult = cached?.pathfinding_result ?? null;
+        if (
+          cachedResult
+          && cached.graph_version === snapshot.graphVersion
+          && JSON.stringify(cachedResult.usedConfig) === configJson
+        ) {
+          return cachedResult;
+        }
+
+        let routeResult: NavigationRouteResult;
+        try {
+          routeResult = await routeWithFallback({
+            base: {
+              from: body.from,
+              to: body.to,
+              graph: snapshot,
+              routeMetrics,
+              config,
+            },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const isTimeout = /timed out/i.test(message);
+          return reply.code(isTimeout ? 504 : 500).send({
+            error: isTimeout
+              ? "Routing timed out while searching for a path"
+              : "Routing failed while searching for a path",
+            details: message,
+          });
+        }
 
         const now = new Date();
         const dayOfWeek = now.getDay();
@@ -320,8 +506,10 @@ export async function busRoutes(fastify: FastifyInstance) {
               dest_label,
               route_ids,
               transfer_count,
+              best_effort,
               total_distance_m,
               total_duration_seconds,
+              graph_version,
               pathfinding_result,
               day_of_week,
               hour_of_day,
@@ -329,7 +517,7 @@ export async function busRoutes(fastify: FastifyInstance) {
             )
             VALUES (
               $1, $2, $3, $4, $5, $6, $7,
-              $8, $9, $10, $11, $12::jsonb, $13, $14, $15
+              $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17
             )
             `,
             [
@@ -342,8 +530,10 @@ export async function busRoutes(fastify: FastifyInstance) {
               body.to.label ?? null,
               routeIds.length > 0 ? routeIds : null,
               routeResult.transferCount,
+              routeResult.bestEffort,
               totalDistanceM,
               routeResult.etaSeconds,
+              routeResult.graphVersion,
               JSON.stringify(routeResult as NavigationRouteResult),
               dayOfWeek,
               hourOfDay,

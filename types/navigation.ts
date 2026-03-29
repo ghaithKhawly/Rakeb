@@ -10,8 +10,15 @@ export type RoutingPreferenceWeights = {
 
 export type RoutingOptions = {
   maxWalkingDistanceM?: number;
+  maxTotalWalkingDistanceM?: number;
   maxWalkingNeighbors?: number;
+  maxBusTransfers?: number;
   walkingSpeedMps?: number;
+  walkLinearCoeff?: number;
+  walkExpCoeff?: number;
+  walkExpScaleM?: number;
+  transferExpCoeff?: number;
+  transferExpRate?: number;
 };
 
 export type NavigationRouteRequestBody = {
@@ -57,7 +64,8 @@ export type RoutingGraphSnapshot = {
   nodes: RoutingGraphNode[];
   edges: RoutingGraphEdge[];
   routeNodes: RoutingGraphRouteNode[];
-  loadedAt: string;
+  loadedAt: string | null;
+  graphVersion: string | null;
 };
 
 export type RouteLiveMetricForRouting = {
@@ -71,8 +79,15 @@ export type RouteLiveMetricForRouting = {
 export type EffectiveRoutingConfig = {
   weights: RoutingPreferenceWeights;
   maxWalkingDistanceM: number;
+  maxTotalWalkingDistanceM: number;
   maxWalkingNeighbors: number;
+  maxBusTransfers: number;
   walkingSpeedMps: number;
+  walkLinearCoeff: number;
+  walkExpCoeff: number;
+  walkExpScaleM: number;
+  transferExpCoeff: number;
+  transferExpRate: number;
 };
 
 export type RoutingWorkerPayload = {
@@ -81,6 +96,7 @@ export type RoutingWorkerPayload = {
   graph: RoutingGraphSnapshot;
   routeMetrics: RouteLiveMetricForRouting[];
   config: EffectiveRoutingConfig;
+  walkingMode?: "dynamic" | "precomputed"; // internal: not exposed to clients
 };
 
 export type RouteCostBreakdown = {
@@ -106,6 +122,7 @@ export type NavigationRouteResult = {
   message: string;
   executedInWorker: true;
   graphLoadedAt: string | null;
+  graphVersion: string | null;
   from: LocationDTO;
   to: LocationDTO;
   totalCost: number;
@@ -114,5 +131,7 @@ export type NavigationRouteResult = {
   walkingDistanceM: number;
   etaSeconds: number;
   segments: RouteSegment[];
+  bestEffort: boolean;
+  // usedConfig is the server-client parity contract for routing formulas/constants.
   usedConfig: EffectiveRoutingConfig;
 };

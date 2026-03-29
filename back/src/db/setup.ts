@@ -177,8 +177,10 @@ export async function setupDatabase(fastify: FastifyInstance) {
         dest_label VARCHAR(100),
         route_ids INTEGER[],
         transfer_count INTEGER DEFAULT 0,
+        best_effort BOOLEAN NOT NULL DEFAULT FALSE,
         total_distance_m DOUBLE PRECISION,
         total_duration_seconds DOUBLE PRECISION,
+        graph_version TEXT,
         pathfinding_result JSONB,
         day_of_week SMALLINT NOT NULL,
         hour_of_day SMALLINT NOT NULL,
@@ -198,6 +200,20 @@ export async function setupDatabase(fastify: FastifyInstance) {
           WHERE table_name='travel_history' AND column_name='pathfinding_result'
         ) THEN
           ALTER TABLE travel_history ADD COLUMN pathfinding_result JSONB;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='travel_history' AND column_name='graph_version'
+        ) THEN
+          ALTER TABLE travel_history ADD COLUMN graph_version TEXT;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='travel_history' AND column_name='best_effort'
+        ) THEN
+          ALTER TABLE travel_history ADD COLUMN best_effort BOOLEAN NOT NULL DEFAULT FALSE;
         END IF;
       END $$;
     `);
@@ -303,8 +319,15 @@ export async function setupDatabase(fastify: FastifyInstance) {
         transfer_weight DOUBLE PRECISION NOT NULL DEFAULT 1,
         walking_weight DOUBLE PRECISION NOT NULL DEFAULT 1,
         max_walking_distance_m DOUBLE PRECISION NOT NULL DEFAULT 1000,
+        max_total_walking_distance_m DOUBLE PRECISION NOT NULL DEFAULT 2000,
         max_walking_neighbors INTEGER NOT NULL DEFAULT 12,
+        max_bus_transfers INTEGER NOT NULL DEFAULT 5,
         walking_speed_mps DOUBLE PRECISION NOT NULL DEFAULT 1.25,
+        walk_linear_coeff DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+        walk_exp_coeff DOUBLE PRECISION NOT NULL DEFAULT 0.1,
+        walk_exp_scale_m DOUBLE PRECISION NOT NULL DEFAULT 800,
+        transfer_exp_coeff DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+        transfer_exp_rate DOUBLE PRECISION NOT NULL DEFAULT 0.8,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         CHECK (speed_weight >= 0),
         CHECK (crowding_weight >= 0),
@@ -312,9 +335,77 @@ export async function setupDatabase(fastify: FastifyInstance) {
         CHECK (transfer_weight >= 0),
         CHECK (walking_weight >= 0),
         CHECK (max_walking_distance_m >= 50 AND max_walking_distance_m <= 2000),
+        CHECK (max_total_walking_distance_m >= 0 AND max_total_walking_distance_m <= 10000),
         CHECK (max_walking_neighbors >= 1 AND max_walking_neighbors <= 100),
-        CHECK (walking_speed_mps >= 0.4 AND walking_speed_mps <= 3.5)
+        CHECK (max_bus_transfers >= 0 AND max_bus_transfers <= 10),
+        CHECK (walking_speed_mps >= 0.4 AND walking_speed_mps <= 3.5),
+        CHECK (walk_linear_coeff >= 0 AND walk_linear_coeff <= 5),
+        CHECK (walk_exp_coeff >= 0 AND walk_exp_coeff <= 2),
+        CHECK (walk_exp_scale_m >= 100 AND walk_exp_scale_m <= 5000),
+        CHECK (transfer_exp_coeff >= 0 AND transfer_exp_coeff <= 5),
+        CHECK (transfer_exp_rate >= 0.1 AND transfer_exp_rate <= 3)
       );
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='max_total_walking_distance_m'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN max_total_walking_distance_m DOUBLE PRECISION NOT NULL DEFAULT 2000;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='max_bus_transfers'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN max_bus_transfers INTEGER NOT NULL DEFAULT 5;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='walk_linear_coeff'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN walk_linear_coeff DOUBLE PRECISION NOT NULL DEFAULT 1.0;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='walk_exp_coeff'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN walk_exp_coeff DOUBLE PRECISION NOT NULL DEFAULT 0.1;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='walk_exp_scale_m'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN walk_exp_scale_m DOUBLE PRECISION NOT NULL DEFAULT 800;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='transfer_exp_coeff'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN transfer_exp_coeff DOUBLE PRECISION NOT NULL DEFAULT 0.5;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='user_routing_preferences' AND column_name='transfer_exp_rate'
+        ) THEN
+          ALTER TABLE user_routing_preferences
+          ADD COLUMN transfer_exp_rate DOUBLE PRECISION NOT NULL DEFAULT 0.8;
+        END IF;
+      END $$;
     `);
 
     console.log("✅ Database tables created/verified");
