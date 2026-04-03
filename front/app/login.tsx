@@ -10,11 +10,11 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
-  SafeAreaView
+  SafeAreaView,
 } from "react-native";
-import { api } from "@/config/api";
-import { Colors } from "@/constants/theme";
-import { Ionicons } from '@expo/vector-icons';
+import { API_BASE_URL, api } from "@/config/api";
+import { Colors, Kinetic } from "@/constants/theme";
+import { Ionicons } from "@expo/vector-icons";
 import { AxiosError } from "axios";
 import { useAuth } from "@/hooks/AuthContext";
 
@@ -44,7 +44,43 @@ export default function Login() {
       Alert.alert("Success", "Logged in successfully");
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;
-      const message = axiosError.response?.data?.error || "Login failed";
+      const message =
+        axiosError.response?.data?.error ||
+        (axiosError.response
+          ? "Login failed"
+          : `Cannot reach backend at ${API_BASE_URL}. If using a phone, set EXPO_PUBLIC_API_URL to your PC LAN IP.`);
+      Alert.alert("Error", message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!username || !password) {
+      Alert.alert("Error", "Please fill in username and password first");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const registerResponse = await api.post("/api/auth/register", {
+        username,
+        password,
+      });
+
+      const { token, userId } = registerResponse.data as {
+        token: string;
+        userId: number;
+      };
+      await signIn(token, { id: userId, username });
+      Alert.alert("Success", "Account created and logged in");
+    } catch (error) {
+      const axiosError = error as AxiosError<{ error: string }>;
+      const message =
+        axiosError.response?.data?.error ||
+        (axiosError.response
+          ? "Registration failed"
+          : `Cannot reach backend at ${API_BASE_URL}. If using a phone, set EXPO_PUBLIC_API_URL to your PC LAN IP.`);
       Alert.alert("Error", message);
     } finally {
       setLoading(false);
@@ -54,8 +90,8 @@ export default function Login() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <KeyboardAvoidingView 
-          style={styles.container} 
+        <KeyboardAvoidingView
+          style={styles.container}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
         >
@@ -102,6 +138,17 @@ export default function Login() {
                 {loading ? "AUTHENTICATING..." : "SIGN IN"}
               </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleRegister}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.secondaryButtonText}>CREATE ACCOUNT</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.apiHint}>Backend: {API_BASE_URL}</Text>
           </View>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
@@ -121,21 +168,21 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 48,
-    alignItems: 'center',
+    alignItems: "center",
   },
   iconContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(45, 212, 191, 0.1)', // Light teal background
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(45, 212, 191, 0.1)", // Light teal background
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 24,
   },
   title: {
     fontSize: 32,
     fontWeight: "800",
-    color: '#FFFFFF',
+    color: Kinetic.onSurface,
     letterSpacing: -0.5,
     marginBottom: 8,
   },
@@ -166,7 +213,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    color: '#FFFFFF',
+    color: Kinetic.onSurface,
     fontWeight: "500",
   },
   button: {
@@ -181,9 +228,30 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.border,
   },
   buttonText: {
-    color: Colors.dark.background,
+    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 1,
+  },
+  secondaryButton: {
+    height: 46,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    backgroundColor: Colors.dark.surface,
+  },
+  secondaryButtonText: {
+    color: Colors.dark.text,
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  apiHint: {
+    color: Colors.dark.icon,
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 6,
   },
 });

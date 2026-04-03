@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kinetic | Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&amp;family=Public_Sans:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "tertiary": "#833700",
+                        "primary-fixed-dim": "#b7c4ff",
+                        "on-background": "#1a1c1e",
+                        "surface": "#faf9fc",
+                        "surface-bright": "#faf9fc",
+                        "inverse-primary": "#b7c4ff",
+                        "on-secondary": "#ffffff",
+                        "secondary": "#5d5e61",
+                        "surface-container-highest": "#e3e2e5",
+                        "inverse-surface": "#2f3033",
+                        "surface-variant": "#e3e2e5",
+                        "background": "#faf9fc",
+                        "outline-variant": "#c3c5d9",
+                        "surface-container-low": "#f4f3f6",
+                        "tertiary-container": "#a94900",
+                        "surface-container-high": "#e8e8eb",
+                        "on-surface-variant": "#434656",
+                        "secondary-fixed-dim": "#c6c6c9",
+                        "on-tertiary-container": "#ffdece",
+                        "on-primary-fixed-variant": "#0038b6",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#e2e2e5",
+                        "on-primary-container": "#dfe3ff",
+                        "inverse-on-surface": "#f1f0f3",
+                        "surface-container": "#eeedf0",
+                        "on-primary-fixed": "#001452",
+                        "tertiary-fixed-dim": "#ffb690",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#783200",
+                        "on-secondary-fixed-variant": "#454749",
+                        "error": "#ba1a1a",
+                        "primary-container": "#0052ff",
+                        "surface-tint": "#004ced",
+                        "primary-fixed": "#dde1ff",
+                        "outline": "#737688",
+                        "on-secondary-fixed": "#1a1c1e",
+                        "error-container": "#ffdad6",
+                        "on-primary": "#ffffff",
+                        "on-surface": "#1a1c1e",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed": "#ffdbca",
+                        "on-tertiary-fixed": "#331100",
+                        "on-secondary-container": "#636467",
+                        "secondary-container": "#e2e2e5",
+                        "surface-dim": "#dadadc",
+                        "primary": "#003ec7",
+                        "on-error-container": "#93000a"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Public Sans"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .tonal-depth-shift {
+            background-color: rgba(250, 249, 252, 0.8);
+            backdrop-filter: blur(20px);
+        }
+        body {
+            background-color: #faf9fc;
+            color: #1a1c1e;
+            -webkit-font-smoothing: antialiased;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body selection:bg-primary-fixed selection:text-primary">
+<!-- Top App Bar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0px_0px_32px_rgba(26,28,30,0.06)]">
+<div class="flex justify-between items-center w-full px-8 py-4">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-blue-700 dark:text-blue-400 cursor-pointer">menu</span>
+<span class="text-2xl font-black text-blue-700 dark:text-blue-400 italic font-headline tracking-tight">Kinetic</span>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-container-highest overflow-hidden border border-outline-variant/15">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="portrait of a professional man in high-end urban minimalist fashion against a clean neutral architectural background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDwxxyqCeAkNiTtJsJhr90p_Samq9Z7GrPvqwsHb6dCK3zfQ6FQ3XSmAvFV6h3ho8Qu8VJEcQOroADUk5PfRMDEfcnneZJ4wKV19BfEheLBoghgHodGjyEFbJNxNC-7UBrUigbcUqCSgWYnH88gQ58c9HAc8uNP_PHmWVofaJdqvZBxMkafLFEJt7u-mlZAdbrIDW-XxlW50-CQ66if1acP4-uh6nUWtCPlH68faN11vqiNG1VwhDule41c-PfgLEegC5e8QOxvg0fq"/>
+</div>
+</div>
+</header>
+<main class="pt-24 pb-32 px-6 max-w-2xl mx-auto">
+<!-- Page Title -->
+<section class="mb-12">
+<h1 class="text-5xl font-black tracking-tighter text-on-surface mb-2 font-headline">Settings</h1>
+<p class="text-on-surface-variant font-medium">Customize your movement through the city.</p>
+</section>
+<!-- Profile Brief (Editorial Bento Style) -->
+<div class="mb-10 grid grid-cols-1 gap-4">
+<div class="bg-surface-container-lowest p-6 rounded-xl flex items-center gap-6 shadow-[0px_4px_24px_rgba(0,0,0,0.02)] border border-outline-variant/10">
+<div class="w-20 h-20 rounded-xl overflow-hidden">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="Close up portrait of a young professional in soft morning light looking confidently into the camera" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDuACfeSDcV8I92bK5vo5wEQR1TnWcmZ7PRlDWlSC-xNNALj4tyIJyXU9K-BHyLuEdc9Ra9f3GHjLjUQzVLxQvHR8crlmz8l-lVVUU_KpnVegSP-8l-jyqcTmVcLr-xpBTAV6QeAhlzFuFkl_QkhQPLvpZqA44cMicplu8oF1YE4kxKthPYuskfhda4xz-FZk_UQgvTtpBAS8_oCbaFcTrxlaNuoeeMYaa8mpm0RYcKDcOUPwWez1fpMwuHWqcYTJxpKgOdzs4QgCW0"/>
+</div>
+<div>
+<h2 class="text-xl font-bold text-on-surface">Alex Chen</h2>
+<p class="text-label text-[11px] uppercase tracking-widest text-primary font-bold">Kinetic Elite Member</p>
+</div>
+<div class="ml-auto">
+<button class="bg-surface-container-high px-4 py-2 rounded-lg text-primary font-bold text-sm hover:bg-primary hover:text-white transition-all">Edit</button>
+</div>
+</div>
+</div>
+<!-- Navigation Menu -->
+<nav class="space-y-4">
+<!-- Group Label -->
+<h3 class="font-label text-[10px] uppercase tracking-[0.2em] font-bold text-on-surface-variant/60 ml-1">Transportation</h3>
+<!-- Option 1: Routes Map -->
+<a class="group flex items-center justify-between p-6 bg-surface-container rounded-xl transition-all active:scale-[0.98] hover:bg-surface-container-high" href="#">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
+<span class="material-symbols-outlined text-[28px]" data-icon="map">map</span>
+</div>
+<div>
+<span class="text-lg font-bold text-on-surface block">Routes Map</span>
+<span class="text-sm text-on-surface-variant">View and toggle bus lines</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">chevron_right</span>
+</a>
+<!-- Option 2: Preferences -->
+<a class="group flex items-center justify-between p-6 bg-surface-container rounded-xl transition-all active:scale-[0.98] hover:bg-surface-container-high" href="#">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
+<span class="material-symbols-outlined text-[28px]" data-icon="tune">tune</span>
+</div>
+<div>
+<span class="text-lg font-bold text-on-surface block">Preferences</span>
+<span class="text-sm text-on-surface-variant">Customize routing factors</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">chevron_right</span>
+</a>
+<!-- Group Label -->
+<h3 class="font-label text-[10px] uppercase tracking-[0.2em] font-bold text-on-surface-variant/60 ml-1 mt-8 block">Experience</h3>
+<!-- Option 3: Notifications (Contextual) -->
+<a class="group flex items-center justify-between p-6 bg-surface-container rounded-xl transition-all active:scale-[0.98] hover:bg-surface-container-high" href="#">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-[28px]" data-icon="notifications">notifications</span>
+</div>
+<div>
+<span class="text-lg font-bold text-on-surface block">Alerts &amp; Notifications</span>
+<span class="text-sm text-on-surface-variant">Live delays and arrival times</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">chevron_right</span>
+</a>
+<!-- Option 4: Privacy -->
+<a class="group flex items-center justify-between p-6 bg-surface-container rounded-xl transition-all active:scale-[0.98] hover:bg-surface-container-high" href="#">
+<div class="flex items-center gap-5">
+<div class="w-14 h-14 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-[28px]" data-icon="shield">shield</span>
+</div>
+<div>
+<span class="text-lg font-bold text-on-surface block">Privacy &amp; Security</span>
+<span class="text-sm text-on-surface-variant">Data usage and permissions</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">chevron_right</span>
+</a>
+</nav>
+<!-- Sign Out CTA -->
+<button class="w-full mt-12 py-6 rounded-xl border border-error/10 text-error font-bold flex items-center justify-center gap-3 hover:bg-error/5 transition-colors">
+<span class="material-symbols-outlined">logout</span>
+            Sign Out
+        </button>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 w-full z-50 bg-white dark:bg-slate-900 rounded-t-[1.5rem] shadow-[0px_-4px_24px_rgba(0,0,0,0.04)]">
+<div class="flex justify-around items-center w-full px-6 pb-8 pt-2">
+<!-- Explore (Inactive) -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-6 py-2 hover:text-blue-600 dark:hover:text-blue-200 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="explore">explore</span>
+<span class="font-label text-[11px] uppercase tracking-[0.05em] font-bold">Explore</span>
+</a>
+<!-- Settings (Active) -->
+<a class="flex flex-col items-center justify-center bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-[1.5rem] px-6 py-2 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="settings" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="font-label text-[11px] uppercase tracking-[0.05em] font-bold">Settings</span>
+</a>
+</div>
+</nav>
+</body></html>

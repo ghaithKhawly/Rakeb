@@ -8,10 +8,12 @@ import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { QueryProvider } from "@/config/queryProvider";
 import { AuthProvider, useAuth } from "@/hooks/AuthContext";
+import { RoutePlanningProvider } from "@/hooks/RoutePlanningContext";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -37,7 +39,7 @@ function RootLayoutNav() {
       // Redirect to the home page if authenticated
       router.replace("/(tabs)");
     }
-  }, [user, segments, isLoading]);
+  }, [user, segments, isLoading, router]);
 
   if (isLoading) {
     return (
@@ -49,29 +51,32 @@ function RootLayoutNav() {
 
   return (
     <QueryProvider>
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="settings/routes"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="modal"
-            options={{ presentation: "modal", title: "Modal" }}
-          />
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <RoutePlanningProvider>
+        <ThemeProvider
+          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+        >
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="(settings)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="modal"
+              options={{ presentation: "modal", title: "Modal" }}
+            />
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </RoutePlanningProvider>
     </QueryProvider>
   );
 }
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
