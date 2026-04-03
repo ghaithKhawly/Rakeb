@@ -305,6 +305,21 @@ function findNearbyNodeIds(
   return candidates.slice(0, maxNeighbors);
 }
 
+function findAnchorNodeIds(
+  location: LocationDTO,
+  indexes: GraphIndexes,
+): Array<{ nodeId: number; distanceM: number }> {
+  const candidates: Array<{ nodeId: number; distanceM: number }> = [];
+
+  for (const node of indexes.nodeById.values()) {
+    const distanceM = haversineDistanceM(location, nodeToLocation(node));
+    candidates.push({ nodeId: node.id, distanceM });
+  }
+
+  candidates.sort((a, b) => a.distanceM - b.distanceM);
+  return candidates;
+}
+
 function buildWalkingEdge(
   fromNodeId: number,
   toNodeId: number,
@@ -475,13 +490,9 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
   const indexes = buildIndexes(graph, bucketSizeDeg);
   const metricsByRoute: RouteMetricsById = new Map(routeMetrics.map((metric) => [metric.routeId, metric]));
 
-  const startNeighbors = findNearbyNodeIds(from, config.maxWalkingDistanceM, config.maxWalkingNeighbors, indexes);
-  const endNeighbors = findNearbyNodeIds(to, config.maxWalkingDistanceM, config.maxWalkingNeighbors, indexes);
+  const startNeighbors = findAnchorNodeIds(from, indexes);
+  const endNeighbors = findAnchorNodeIds(to, indexes);
   const endNeighborSet = new Set(endNeighbors.map((n) => n.nodeId));
-
-  if (startNeighbors.length === 0 || endNeighbors.length === 0) {
-    throw new Error("No reachable graph nodes found within walking radius for origin or destination");
-  }
 
   const startStateKey = makeStateKey(START_NODE_ID, null, 0, false, 0);
   const openSet = new MinHeap();
