@@ -334,7 +334,7 @@ export async function setupDatabase(fastify: FastifyInstance) {
         CHECK (price_weight >= 0),
         CHECK (transfer_weight >= 0),
         CHECK (walking_weight >= 0),
-        CHECK (max_walking_distance_m >= 50 AND max_walking_distance_m <= 2000),
+        CHECK (max_walking_distance_m >= 50),
         CHECK (max_total_walking_distance_m >= 0 AND max_total_walking_distance_m <= 10000),
         CHECK (max_walking_neighbors >= 1 AND max_walking_neighbors <= 100),
         CHECK (max_bus_transfers >= 0 AND max_bus_transfers <= 10),
@@ -404,6 +404,56 @@ export async function setupDatabase(fastify: FastifyInstance) {
         ) THEN
           ALTER TABLE user_routing_preferences
           ADD COLUMN transfer_exp_rate DOUBLE PRECISION NOT NULL DEFAULT 0.8;
+        END IF;
+      END $$;
+    `);
+
+    // Relax legacy cap (<= 2000) on max_walking_distance_m for existing installations.
+    await client.query(`
+      DO $$
+      DECLARE
+        c RECORD;
+      BEGIN
+        ALTER TABLE user_routing_preferences
+        DROP CONSTRAINT IF EXISTS user_routing_preferences_max_walking_distance_m_check;
+
+        ALTER TABLE user_routing_preferences
+        DROP CONSTRAINT IF EXISTS chk_user_pref_max_walking_distance_m;
+
+        ALTER TABLE user_routing_preferences
+        DROP CONSTRAINT IF EXISTS chk_user_pref_max_walking_distance_m_min;
+
+        FOR c IN
+          SELECT con.conname
+          FROM pg_constraint con
+          JOIN pg_class rel ON rel.oid = con.conrelid
+          JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+          WHERE nsp.nspname = 'public'
+            AND rel.relname = 'user_routing_preferences'
+            AND con.contype = 'c'
+            AND pg_get_constraintdef(con.oid) ILIKE '%max_walking_distance_m%'
+            AND pg_get_constraintdef(con.oid) ILIKE '%2000%'
+        LOOP
+          EXECUTE format('ALTER TABLE user_routing_preferences DROP CONSTRAINT %I', c.conname);
+        END LOOP;
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint con
+          JOIN pg_class rel ON rel.oid = con.conrelid
+          JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+          WHERE nsp.nspname = 'public'
+            AND rel.relname = 'user_routing_preferences'
+            AND con.contype = 'c'
+            AND pg_get_constraintdef(con.oid) ILIKE '%max_walking_distance_m >= 50%'
+        ) THEN
+          BEGIN
+            ALTER TABLE user_routing_preferences
+            ADD CONSTRAINT chk_user_pref_max_walking_distance_m_min
+            CHECK (max_walking_distance_m >= 50);
+          EXCEPTION
+            WHEN duplicate_object THEN NULL;
+          END;
         END IF;
       END $$;
     `);

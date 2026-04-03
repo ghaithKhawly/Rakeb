@@ -33,7 +33,7 @@ export const navigationRouteSchema = {
         type: "object",
         additionalProperties: false,
         properties: {
-          maxWalkingDistanceM: { type: "number", minimum: 50, maximum: 2000 },
+          maxWalkingDistanceM: { type: "number", minimum: 50 },
           maxTotalWalkingDistanceM: { type: "number", minimum: 0, maximum: 10000 },
           maxWalkingNeighbors: { type: "integer", minimum: 1, maximum: 100 },
           maxBusTransfers: { type: "integer", minimum: 0, maximum: 10 },

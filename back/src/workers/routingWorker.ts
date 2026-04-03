@@ -84,6 +84,64 @@ type GraphIndexes = {
   bucketSizeDeg: number;
 };
 
+type RoutingDiagnostics = {
+  expandedStates: number;
+  generatedEdges: number;
+  prunedAnchors: number;
+  prunedMaxSingleWalk: number;
+  prunedMaxTotalWalk: number;
+  prunedMaxBusTransfers: number;
+  prunedLongWalkSpacing: number;
+  prunedDominated: number;
+  prunedMissingState: number;
+  bestFrontierCost: number | null;
+  bestFrontierWalkM: number | null;
+};
+
+function createDiagnostics(): RoutingDiagnostics {
+  return {
+    expandedStates: 0,
+    generatedEdges: 0,
+    prunedAnchors: 0,
+    prunedMaxSingleWalk: 0,
+    prunedMaxTotalWalk: 0,
+    prunedMaxBusTransfers: 0,
+    prunedLongWalkSpacing: 0,
+    prunedDominated: 0,
+    prunedMissingState: 0,
+    bestFrontierCost: null,
+    bestFrontierWalkM: null,
+  };
+}
+
+function logRoutingDiagnostics(
+  diagnostics: RoutingDiagnostics,
+  payload: RoutingWorkerPayload,
+  startNeighborsCount: number,
+  endNeighborsCount: number,
+  walkingMode: "dynamic" | "precomputed",
+): void {
+  const summary = {
+    walkingMode,
+    startNeighborsCount,
+    endNeighborsCount,
+    config: {
+      maxWalkingDistanceM: payload.config.maxWalkingDistanceM,
+      maxTotalWalkingDistanceM: payload.config.maxTotalWalkingDistanceM,
+      maxBusTransfers: payload.config.maxBusTransfers,
+      walkingSpeedMps: payload.config.walkingSpeedMps,
+      walkLinearCoeff: payload.config.walkLinearCoeff,
+      walkExpCoeff: payload.config.walkExpCoeff,
+      walkExpScaleM: payload.config.walkExpScaleM,
+      transferExpCoeff: payload.config.transferExpCoeff,
+      transferExpRate: payload.config.transferExpRate,
+    },
+    diagnostics,
+  };
+
+  console.warn("[routing-worker] search failed", JSON.stringify(summary));
+}
+
 class MinHeap {
   private items: QueueNode[] = [];
 
@@ -457,6 +515,7 @@ function mergeComponents(
 function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult {
   const { graph, from, to, routeMetrics, config } = payload;
   const walkingMode = payload.walkingMode ?? "dynamic";
+  const diagnostics = createDiagnostics();
   const longWalkThresholdM = Math.max(1000, Math.min(config.maxWalkingDistanceM * 0.9, config.maxWalkingDistanceM));
   const minBusDistanceBetweenLongWalksM = Math.max(800, config.maxTotalWalkingDistanceM * 0.25);
   const enforceLongWalkSpacing = config.maxTotalWalkingDistanceM >= 4000 && config.maxWalkingDistanceM >= 1200;
@@ -494,6 +553,22 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
   const endNeighbors = findAnchorNodeIds(to, indexes);
   const endNeighborSet = new Set(endNeighbors.map((n) => n.nodeId));
 
+  if (process.env.DEBUG_ROUTING === "1") {
+    console.warn("[routing-worker] search start", JSON.stringify({
+      walkingMode,
+      from,
+      to,
+      startNeighborsCount: startNeighbors.length,
+      endNeighborsCount: endNeighbors.length,
+      config: {
+        maxWalkingDistanceM: config.maxWalkingDistanceM,
+        maxTotalWalkingDistanceM: config.maxTotalWalkingDistanceM,
+        maxBusTransfers: config.maxBusTransfers,
+        walkingSpeedMps: config.walkingSpeedMps,
+      },
+    }));
+  }
+
   const startStateKey = makeStateKey(START_NODE_ID, null, 0, false, 0);
   const openSet = new MinHeap();
   const gScore = new Map<string, number>();
@@ -514,6 +589,12 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       break;
     }
 
+    diagnostics.expandedStates += 1;
+    if (diagnostics.bestFrontierCost === null || current.fScore < diagnostics.bestFrontierCost) {
+      diagnostics.bestFrontierCost = current.fScore;
+      diagnostics.bestFrontierWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
+    }
+
     const currentBest = fScore.get(current.stateKey);
     if (currentBest !== undefined && current.fScore - currentBest > EPSILON) {
       continue;
@@ -531,6 +612,11 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
     if (currentState.nodeId === START_NODE_ID) {
       for (const neighbor of startNeighbors) {
+        if (neighbor.nodeId === START_NODE_ID) {
+          diagnostics.prunedAnchors += 1;
+          continue;
+        }
+
         candidateEdges.push(buildWalkingEdge(
           START_NODE_ID,
           neighbor.nodeId,
@@ -598,17 +684,21 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       }
     }
 
+    diagnostics.generatedEdges += candidateEdges.length;
+
     for (const edge of candidateEdges) {
       const isAnchorWalkingEdge = edge.mode === "walk"
         && (edge.fromNodeId === START_NODE_ID || edge.toNodeId === END_NODE_ID);
 
       if (!isAnchorWalkingEdge && edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
+        diagnostics.prunedMaxSingleWalk += 1;
         continue;
       }
 
       const existingWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
       const projectedWalkM = existingWalkM + (edge.mode === "walk" ? edge.distanceM : 0);
       if (!isAnchorWalkingEdge && projectedWalkM > config.maxTotalWalkingDistanceM) {
+        diagnostics.prunedMaxTotalWalk += 1;
         continue;
       }
 
@@ -617,6 +707,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
         && edge.transferIncrement > 0
         && currentState.busTransferCount >= config.maxBusTransfers
       ) {
+        diagnostics.prunedMaxBusTransfers += 1;
         continue;
       }
 
@@ -631,6 +722,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
         && currentState.hasLongWalk
         && currentState.busDistanceSinceLongWalkM + EPSILON < minBusDistanceBetweenLongWalksM
       ) {
+        diagnostics.prunedLongWalkSpacing += 1;
         continue;
       }
 
@@ -661,6 +753,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
       const knownG = gScore.get(nextStateKey);
       if (knownG !== undefined && tentativeG >= knownG - EPSILON) {
+        diagnostics.prunedDominated += 1;
         continue;
       }
 
@@ -688,7 +781,9 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
   }
 
   if (!finalKey) {
-    throw new Error("No route found between origin and destination under current constraints");
+    diagnostics.prunedMissingState = gScore.size;
+    logRoutingDiagnostics(diagnostics, payload, startNeighbors.length, endNeighbors.length, walkingMode);
+    throw new Error(`No route found between origin and destination under current constraints | diagnostics=${JSON.stringify(diagnostics)}`);
   }
 
   const steps: StepEdge[] = [];

@@ -385,3 +385,142 @@ export const deleteUserTravelHistorySchema = {
     },
   },
 };
+
+export const getRoutingPreferencesSchema = {
+  tags: ["Navigation"],
+  summary: "Get current user routing preferences",
+  operationId: "getRoutingPreferences",
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        preferences: {
+          type: "object",
+          required: ["speed", "crowding", "price", "transfer", "walking"],
+          properties: {
+            speed: { type: "number" },
+            crowding: { type: "number" },
+            price: { type: "number" },
+            transfer: { type: "number" },
+            walking: { type: "number" },
+          },
+        },
+        options: {
+          type: "object",
+          required: [
+            "maxWalkingDistanceM",
+            "maxTotalWalkingDistanceM",
+            "maxWalkingNeighbors",
+            "maxBusTransfers",
+            "walkingSpeedMps",
+            "walkLinearCoeff",
+            "walkExpCoeff",
+            "walkExpScaleM",
+            "transferExpCoeff",
+            "transferExpRate",
+          ],
+          properties: {
+            maxWalkingDistanceM: { type: "number" },
+            maxTotalWalkingDistanceM: { type: "number" },
+            maxWalkingNeighbors: { type: "integer" },
+            maxBusTransfers: { type: "integer" },
+            walkingSpeedMps: { type: "number" },
+            walkLinearCoeff: { type: "number" },
+            walkExpCoeff: { type: "number" },
+            walkExpScaleM: { type: "number" },
+            transferExpCoeff: { type: "number" },
+            transferExpRate: { type: "number" },
+          },
+        },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
+export const setRoutingPreferencesSchema = {
+  tags: ["Navigation"],
+  summary: "Set current user routing preferences",
+  operationId: "setRoutingPreferences",
+  body: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      preferences: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          speed: { type: "number", minimum: 0 },
+          crowding: { type: "number", minimum: 0 },
+          price: { type: "number", minimum: 0 },
+          transfer: { type: "number", minimum: 0 },
+          walking: { type: "number", minimum: 0 },
+        },
+      },
+      options: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          maxWalkingDistanceM: { type: "number", minimum: 50 },
+          maxTotalWalkingDistanceM: { type: "number", minimum: 0, maximum: 10000 },
+          maxWalkingNeighbors: { type: "integer", minimum: 1, maximum: 100 },
+          maxBusTransfers: { type: "integer", minimum: 0, maximum: 10 },
+          walkingSpeedMps: { type: "number", minimum: 0.4, maximum: 3.5 },
+          walkLinearCoeff: { type: "number", minimum: 0, maximum: 5 },
+          walkExpCoeff: { type: "number", minimum: 0, maximum: 2 },
+          walkExpScaleM: { type: "number", minimum: 100, maximum: 5000 },
+          transferExpCoeff: { type: "number", minimum: 0, maximum: 5 },
+          transferExpRate: { type: "number", minimum: 0.1, maximum: 3 },
+        },
+      },
+    },
+    anyOf: [
+      { required: ["preferences"] },
+      { required: ["options"] },
+    ],
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        preferences: {
+          type: "object",
+          properties: {
+            speed: { type: "number" },
+            crowding: { type: "number" },
+            price: { type: "number" },
+            transfer: { type: "number" },
+            walking: { type: "number" },
+          },
+        },
+        options: {
+          type: "object",
+          properties: {
+            maxWalkingDistanceM: { type: "number" },
+            maxTotalWalkingDistanceM: { type: "number" },
+            maxWalkingNeighbors: { type: "integer" },
+            maxBusTransfers: { type: "integer" },
+            walkingSpeedMps: { type: "number" },
+            walkLinearCoeff: { type: "number" },
+            walkExpCoeff: { type: "number" },
+            walkExpScaleM: { type: "number" },
+            transferExpCoeff: { type: "number" },
+            transferExpRate: { type: "number" },
+          },
+        },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};

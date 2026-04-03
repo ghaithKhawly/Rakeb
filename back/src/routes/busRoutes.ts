@@ -6,12 +6,14 @@ import {
   deleteBusSchema,
   graphCacheQuerySchema,
   getBusFeedbackSummarySchema,
+  getRoutingPreferencesSchema,
   getRouteLiveMetricsSchema,
   getUserTravelHistorySchema,
   getGraphSchema,
   getBusSchema,
   getBussesSchema,
   invalidateGraphSchema,
+  setRoutingPreferencesSchema,
   submitBusFeedbackSchema,
 } from "../schemas/bus";
 import type {
@@ -26,6 +28,7 @@ import type {
   GetUserTravelHistoryQuery,
   GraphCacheQuery,
   InvalidateGraphQuery,
+  SetRoutingPreferencesBody,
   SubmitBusFeedbackBody,
 } from "../../../types/bus";
 import type {
@@ -120,8 +123,8 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 function deriveDynamicMaxWalkingDistanceM(maxTotalWalkingDistanceM: number): number {
-  // Keep single-walk cap proportional to total budget while staying within API bounds.
-  return clampNumber(maxTotalWalkingDistanceM * 0.35, 300, 2000);
+  // Keep single-walk cap proportional to total budget while keeping a practical floor.
+  return Math.max(300, maxTotalWalkingDistanceM * 0.35);
 }
 
 async function getEffectiveRoutingConfig(
@@ -169,8 +172,10 @@ async function getEffectiveRoutingConfig(
       explicitTotalWalkingDistanceM ?? (DEFAULT_ROUTING_CONFIG.maxWalkingDistanceM * 2),
     );
 
-  const maxTotalWalkingDistanceM = explicitTotalWalkingDistanceM
-    ?? (maxWalkingDistanceM * 2);
+  const maxTotalWalkingDistanceM = Math.max(
+    explicitTotalWalkingDistanceM ?? (maxWalkingDistanceM * 2),
+    maxWalkingDistanceM,
+  );
 
   return {
     weights: normalizeWeights({
@@ -309,6 +314,8 @@ async function refreshRouteLiveMetrics(
 
 export async function busRoutes(fastify: FastifyInstance) {
   const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 2500);
+  const enableQuickTestRoutes =
+    process.env.ENABLE_DEV_QUICK_TEST_ROUTES === "1" || process.env.NODE_ENV !== "production";
 
   async function routeWithFallback(payload: {
     base: Omit<RoutingWorkerPayload, "walkingMode">;
@@ -545,6 +552,258 @@ export async function busRoutes(fastify: FastifyInstance) {
         }
 
         return routeResult;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  if (enableQuickTestRoutes) {
+    fastify.post(
+      "/navigation/quick-route",
+      {
+        schema: navigationRouteSchema,
+      },
+      async (request, reply) => {
+        const snapshot = await graphCache.getSnapshot(fastify);
+        const body = request.body as NavigationRouteRequestBody;
+
+        const client = await fastify.pg.connect();
+        try {
+          const metricsRes = await client.query<{
+            route_id: number;
+            effective_price: number | null;
+            effective_speed_score: number | null;
+            effective_crowding_score: number | null;
+            effective_slowness_multiplier: number | null;
+          }>(
+            `
+            SELECT
+              route_id,
+              effective_price,
+              effective_speed_score,
+              effective_crowding_score,
+              effective_slowness_multiplier
+            FROM route_live_metrics
+            `,
+          );
+
+          const routeMetrics: RouteLiveMetricForRouting[] = metricsRes.rows.map((row: {
+            route_id: number;
+            effective_price: number | null;
+            effective_speed_score: number | null;
+            effective_crowding_score: number | null;
+            effective_slowness_multiplier: number | null;
+          }) => ({
+            routeId: row.route_id,
+            effectivePrice: row.effective_price,
+            effectiveSpeedScore: row.effective_speed_score,
+            effectiveCrowdingScore: row.effective_crowding_score,
+            effectiveSlownessMultiplier: row.effective_slowness_multiplier,
+          }));
+
+          const config = await getEffectiveRoutingConfig(client, 0, body);
+
+          try {
+            const routeResult = await routeWithFallback({
+              base: {
+                from: body.from,
+                to: body.to,
+                graph: snapshot,
+                routeMetrics,
+                config,
+              },
+            });
+
+            return routeResult;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const isTimeout = /timed out/i.test(message);
+            return reply.code(isTimeout ? 504 : 500).send({
+              error: isTimeout
+                ? "Routing timed out while searching for a path"
+                : "Routing failed while searching for a path",
+              details: message,
+            });
+          }
+        } finally {
+          client.release();
+        }
+      },
+    );
+  }
+
+  fastify.get(
+    "/navigation/preferences",
+    {
+      preHandler: [fastify.authenticate],
+      schema: getRoutingPreferencesSchema,
+    },
+    async (request, reply) => {
+      const userPayload = request.user as { id?: number | string };
+      const userId = Number(userPayload?.id);
+
+      if (!Number.isFinite(userId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const client = await fastify.pg.connect();
+      try {
+        const config = await getEffectiveRoutingConfig(
+          client,
+          userId,
+          {
+            from: { lat: 0, lng: 0 },
+            to: { lat: 0, lng: 0 },
+          },
+        );
+
+        return {
+          preferences: config.weights,
+          options: {
+            maxWalkingDistanceM: config.maxWalkingDistanceM,
+            maxTotalWalkingDistanceM: config.maxTotalWalkingDistanceM,
+            maxWalkingNeighbors: config.maxWalkingNeighbors,
+            maxBusTransfers: config.maxBusTransfers,
+            walkingSpeedMps: config.walkingSpeedMps,
+            walkLinearCoeff: config.walkLinearCoeff,
+            walkExpCoeff: config.walkExpCoeff,
+            walkExpScaleM: config.walkExpScaleM,
+            transferExpCoeff: config.transferExpCoeff,
+            transferExpRate: config.transferExpRate,
+          },
+        };
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  fastify.put(
+    "/navigation/preferences",
+    {
+      preHandler: [fastify.authenticate],
+      schema: setRoutingPreferencesSchema,
+    },
+    async (request, reply) => {
+      const userPayload = request.user as { id?: number | string };
+      const userId = Number(userPayload?.id);
+
+      if (!Number.isFinite(userId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const body = request.body as SetRoutingPreferencesBody;
+      const client = await fastify.pg.connect();
+      try {
+        const current = await getEffectiveRoutingConfig(
+          client,
+          userId,
+          {
+            from: { lat: 0, lng: 0 },
+            to: { lat: 0, lng: 0 },
+          },
+        );
+
+        const nextWeightsRaw = {
+          speed: body.preferences?.speed ?? current.weights.speed,
+          crowding: body.preferences?.crowding ?? current.weights.crowding,
+          price: body.preferences?.price ?? current.weights.price,
+          transfer: body.preferences?.transfer ?? current.weights.transfer,
+          walking: body.preferences?.walking ?? current.weights.walking,
+        };
+
+        const nextWeights = normalizeWeights(nextWeightsRaw);
+        const nextMaxWalkingDistanceM = body.options?.maxWalkingDistanceM ?? current.maxWalkingDistanceM;
+        const nextMaxTotalWalkingDistanceM = Math.max(
+          body.options?.maxTotalWalkingDistanceM
+            ?? (body.options?.maxWalkingDistanceM != null
+              ? body.options.maxWalkingDistanceM * 2
+              : current.maxTotalWalkingDistanceM),
+          nextMaxWalkingDistanceM,
+        );
+
+        await client.query(
+          `
+          INSERT INTO user_routing_preferences (
+            user_id,
+            speed_weight,
+            crowding_weight,
+            price_weight,
+            transfer_weight,
+            walking_weight,
+            max_walking_distance_m,
+            max_total_walking_distance_m,
+            max_walking_neighbors,
+            max_bus_transfers,
+            walking_speed_mps,
+            walk_linear_coeff,
+            walk_exp_coeff,
+            walk_exp_scale_m,
+            transfer_exp_coeff,
+            transfer_exp_rate,
+            updated_at
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11,
+            $12, $13, $14, $15, $16,
+            NOW()
+          )
+          ON CONFLICT (user_id) DO UPDATE
+            SET speed_weight = EXCLUDED.speed_weight,
+                crowding_weight = EXCLUDED.crowding_weight,
+                price_weight = EXCLUDED.price_weight,
+                transfer_weight = EXCLUDED.transfer_weight,
+                walking_weight = EXCLUDED.walking_weight,
+                max_walking_distance_m = EXCLUDED.max_walking_distance_m,
+                max_total_walking_distance_m = EXCLUDED.max_total_walking_distance_m,
+                max_walking_neighbors = EXCLUDED.max_walking_neighbors,
+                max_bus_transfers = EXCLUDED.max_bus_transfers,
+                walking_speed_mps = EXCLUDED.walking_speed_mps,
+                walk_linear_coeff = EXCLUDED.walk_linear_coeff,
+                walk_exp_coeff = EXCLUDED.walk_exp_coeff,
+                walk_exp_scale_m = EXCLUDED.walk_exp_scale_m,
+                transfer_exp_coeff = EXCLUDED.transfer_exp_coeff,
+                transfer_exp_rate = EXCLUDED.transfer_exp_rate,
+                updated_at = NOW()
+          `,
+          [
+            userId,
+            nextWeights.speed,
+            nextWeights.crowding,
+            nextWeights.price,
+            nextWeights.transfer,
+            nextWeights.walking,
+            nextMaxWalkingDistanceM,
+            nextMaxTotalWalkingDistanceM,
+            body.options?.maxWalkingNeighbors ?? current.maxWalkingNeighbors,
+            body.options?.maxBusTransfers ?? current.maxBusTransfers,
+            body.options?.walkingSpeedMps ?? current.walkingSpeedMps,
+            body.options?.walkLinearCoeff ?? current.walkLinearCoeff,
+            body.options?.walkExpCoeff ?? current.walkExpCoeff,
+            body.options?.walkExpScaleM ?? current.walkExpScaleM,
+            body.options?.transferExpCoeff ?? current.transferExpCoeff,
+            body.options?.transferExpRate ?? current.transferExpRate,
+          ],
+        );
+
+        return {
+          message: "Routing preferences saved",
+          preferences: nextWeights,
+          options: {
+            maxWalkingDistanceM: nextMaxWalkingDistanceM,
+            maxTotalWalkingDistanceM: nextMaxTotalWalkingDistanceM,
+            maxWalkingNeighbors: body.options?.maxWalkingNeighbors ?? current.maxWalkingNeighbors,
+            maxBusTransfers: body.options?.maxBusTransfers ?? current.maxBusTransfers,
+            walkingSpeedMps: body.options?.walkingSpeedMps ?? current.walkingSpeedMps,
+            walkLinearCoeff: body.options?.walkLinearCoeff ?? current.walkLinearCoeff,
+            walkExpCoeff: body.options?.walkExpCoeff ?? current.walkExpCoeff,
+            walkExpScaleM: body.options?.walkExpScaleM ?? current.walkExpScaleM,
+            transferExpCoeff: body.options?.transferExpCoeff ?? current.transferExpCoeff,
+            transferExpRate: body.options?.transferExpRate ?? current.transferExpRate,
+          },
+        };
       } finally {
         client.release();
       }

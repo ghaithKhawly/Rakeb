@@ -76,3 +76,25 @@ export type GetUserTravelHistoryQuery = {
 export type DeleteUserTravelHistoryQuery = {
   id: number;
 };
+
+export type SetRoutingPreferencesBody = {
+  preferences?: {
+    speed?: number;
+    crowding?: number;
+    price?: number;
+    transfer?: number;
+    walking?: number;
+  };
+  options?: {
+    maxWalkingDistanceM?: number;
+    maxTotalWalkingDistanceM?: number;
+    maxWalkingNeighbors?: number;
+    maxBusTransfers?: number;
+    walkingSpeedMps?: number;
+    walkLinearCoeff?: number;
+    walkExpCoeff?: number;
+    walkExpScaleM?: number;
+    transferExpCoeff?: number;
+    transferExpRate?: number;
+  };
+};
