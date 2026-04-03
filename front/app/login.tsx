@@ -13,7 +13,7 @@ import {
   SafeAreaView,
 } from "react-native";
 import { API_BASE_URL, api } from "@/config/api";
-import { Colors } from "@/constants/theme";
+import { Colors, Kinetic } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { AxiosError } from "axios";
 import { useAuth } from "@/hooks/AuthContext";
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: Kinetic.onSurface,
     letterSpacing: -0.5,
     marginBottom: 8,
   },
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    color: "#FFFFFF",
+    color: Kinetic.onSurface,
     fontWeight: "500",
   },
   button: {
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.border,
   },
   buttonText: {
-    color: Colors.dark.background,
+    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 1,

@@ -42,6 +42,10 @@ type RouteLine = {
   points: MapCoordinate[];
 };
 
+function normalizeRouteName(name: string): string {
+  return name.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
 const ROUTE_COLORS = [
   "#2DD4BF",
   "#3B82F6",
@@ -342,9 +346,17 @@ export default function RoutesMapScreen() {
     [routeNames],
   );
 
+  const visibleRouteNameSet = useMemo(
+    () => new Set(visibleRouteNames.map((name) => normalizeRouteName(name))),
+    [visibleRouteNames],
+  );
+
   const visibleLines = useMemo(
-    () => routeLines.filter((line) => visibleRouteNames.includes(line.name)),
-    [routeLines, visibleRouteNames],
+    () =>
+      routeLines.filter((line) =>
+        visibleRouteNameSet.has(normalizeRouteName(line.name)),
+      ),
+    [routeLines, visibleRouteNameSet],
   );
 
   const initialRegion = useMemo(
@@ -375,19 +387,29 @@ export default function RoutesMapScreen() {
   }, [fitToVisibleRoutes, isLoading, visibleLines.length]);
 
   useEffect(() => {
-    if (selectedRouteName && !visibleRouteNames.includes(selectedRouteName)) {
+    if (
+      selectedRouteName &&
+      !visibleRouteNameSet.has(normalizeRouteName(selectedRouteName))
+    ) {
       setSelectedRouteName(null);
     }
-  }, [selectedRouteName, visibleRouteNames]);
+  }, [selectedRouteName, visibleRouteNameSet]);
 
   const toggleRouteName = (name: string) => {
-    if (selectedRouteName === name) {
+    const targetKey = normalizeRouteName(name);
+
+    if (
+      selectedRouteName &&
+      normalizeRouteName(selectedRouteName) === targetKey
+    ) {
       setSelectedRouteName(null);
     }
 
     setVisibleRouteNames((previous) =>
-      previous.includes(name)
-        ? previous.filter((routeName) => routeName !== name)
+      previous.some((routeName) => normalizeRouteName(routeName) === targetKey)
+        ? previous.filter(
+            (routeName) => normalizeRouteName(routeName) !== targetKey,
+          )
         : [...previous, name],
     );
   };

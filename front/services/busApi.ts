@@ -13,12 +13,12 @@ import type {
   GraphCacheQuery,
   InvalidateGraphQuery,
   SubmitBusFeedbackBody,
-} from "@types/bus";
+} from "../../types/bus";
 import type {
   NavigationRouteRequestBody,
   NavigationRouteResult,
   RoutingGraphSnapshot,
-} from "@types/navigation";
+} from "../../types/navigation";
 
 export type ApiMessageResponse = {
   message: string;

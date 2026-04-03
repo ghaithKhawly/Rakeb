@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kinetic | Precision Urban Transit</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&amp;family=Public_Sans:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "tertiary": "#833700",
+                        "primary-fixed-dim": "#b7c4ff",
+                        "on-background": "#1a1c1e",
+                        "surface": "#faf9fc",
+                        "surface-bright": "#faf9fc",
+                        "inverse-primary": "#b7c4ff",
+                        "on-secondary": "#ffffff",
+                        "secondary": "#5d5e61",
+                        "surface-container-highest": "#e3e2e5",
+                        "inverse-surface": "#2f3033",
+                        "surface-variant": "#e3e2e5",
+                        "background": "#faf9fc",
+                        "outline-variant": "#c3c5d9",
+                        "surface-container-low": "#f4f3f6",
+                        "tertiary-container": "#a94900",
+                        "surface-container-high": "#e8e8eb",
+                        "on-surface-variant": "#434656",
+                        "secondary-fixed-dim": "#c6c6c9",
+                        "on-tertiary-container": "#ffdece",
+                        "on-primary-fixed-variant": "#0038b6",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#e2e2e5",
+                        "on-primary-container": "#dfe3ff",
+                        "inverse-on-surface": "#f1f0f3",
+                        "surface-container": "#eeedf0",
+                        "on-primary-fixed": "#001452",
+                        "tertiary-fixed-dim": "#ffb690",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#783200",
+                        "on-secondary-fixed-variant": "#454749",
+                        "error": "#ba1a1a",
+                        "primary-container": "#0052ff",
+                        "surface-tint": "#004ced",
+                        "primary-fixed": "#dde1ff",
+                        "outline": "#737688",
+                        "on-secondary-fixed": "#1a1c1e",
+                        "error-container": "#ffdad6",
+                        "on-primary": "#ffffff",
+                        "on-surface": "#1a1c1e",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed": "#ffdbca",
+                        "on-tertiary-fixed": "#331100",
+                        "on-secondary-container": "#636467",
+                        "secondary-container": "#e2e2e5",
+                        "surface-dim": "#dadadc",
+                        "primary": "#003ec7",
+                        "on-error-container": "#93000a"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Public Sans"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .map-container {
+            mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background font-body text-on-surface overflow-hidden">
+<!-- Fullscreen Map Background -->
+<div class="fixed inset-0 z-0">
+<img class="w-full h-full object-cover grayscale-[0.2] brightness-[0.95]" data-alt="Detailed minimalist city map with light grey streets, teal transit lines, and subtle building footprints for outdoor legibility" data-location="New York City" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAu-xEsjm3aWT_ucPHVPU9jaRL_9Ii3RIDDMvBwjeAwhnQgT-5YY7WDDM8fiVNinsuKdKYxD6q4UoRsWaq_r_SA_BbGp3w3I0cHXpJJ3iJ3LUdH4wOR_QFHj7KN6417C1TOvQSRkBIekiSWIoRGD3E-aFs6RfOS_kvr4_XYr27iG2SsGV-ZPy3za-rGiID4lV5FxS7vg2pW1w6dl53mJYIWQAQTS1qS5Q6egcIO8c4QKmCPoeCw7rMiGDkWb3Ej21BxtSg7nVNg21rT"/>
+<!-- User Location Blue Dot -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center">
+<div class="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
+<div class="w-4 h-4 bg-primary border-2 border-white rounded-full shadow-lg"></div>
+</div>
+</div>
+</div>
+<!-- Shared TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0px_0px_32px_rgba(26,28,30,0.06)] flex justify-between items-center px-8 py-4">
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-slate-100/50 transition-colors p-2 rounded-full">menu</button>
+<span class="text-2xl font-black text-blue-700 dark:text-blue-400 italic tracking-tight font-['Inter']">Kinetic</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="hidden md:flex gap-6 items-center">
+<a class="text-blue-700 dark:text-blue-400 font-bold font-['Inter'] tracking-tight" href="#">Explore</a>
+<a class="text-slate-500 dark:text-slate-400 font-['Inter'] tracking-tight" href="#">Settings</a>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-container overflow-hidden border-2 border-primary/10">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="Close up portrait of a young professional woman smiling, soft daylight, blurred urban background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNlwRr0iYn4bm7qq2aoujsNl9Bpw3hdWBBWcKpQ1NMtRGzXEUv9LtAUNUqE0cBVQ2RBiBKZDPfs82TBij2VeOdcQ9Y9VV2uShF7UFpvzPAtunEbI_uV3-1yDRL4_1osMmr03YIGzFHzJUtG2ReJq3VUbE18NNU8b4leaVkHfcbvy4Wcd95yaQLP1GozO7VUKn16cSfXYetJDSIN3IjCLzVz2qCnjH36CHAfQn77EgNE3DUetQ2k5xbb5mBrIbEF8jFOtxWhb0dMEkh"/>
+</div>
+</div>
+</header>
+<!-- Floating UI Components -->
+<main class="relative z-10 w-full h-screen flex flex-col pointer-events-none">
+<!-- Recenter Button -->
+<div class="absolute bottom-64 right-6 pointer-events-auto">
+<button class="w-14 h-14 bg-surface-container-lowest text-primary rounded-full shadow-[0px_4px_24px_rgba(0,0,0,0.08)] flex items-center justify-center active:scale-95 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">my_location</span>
+</button>
+</div>
+<!-- Editorial Info Overlay (Asymmetric Design Element) -->
+<div class="absolute top-28 left-8 md:max-w-md pointer-events-none">
+<h1 class="font-headline font-black text-on-surface text-6xl md:text-7xl leading-[0.9] tracking-tighter opacity-10">NAVIGATE<br/>FREELY.</h1>
+</div>
+<!-- Bottom Sheet Layer -->
+<div class="mt-auto pointer-events-auto">
+<div class="bg-surface-container-lowest rounded-t-xl shadow-[0px_-8px_48px_rgba(0,0,0,0.06)] px-6 pt-3 pb-32 w-full max-w-2xl mx-auto">
+<!-- Handle -->
+<div class="w-10 h-1 bg-outline-variant/30 rounded-full mx-auto mb-6"></div>
+<div class="space-y-6">
+<div class="flex flex-col gap-1">
+<span class="font-label text-[11px] uppercase tracking-[0.1em] font-bold text-on-surface-variant">Journey Start</span>
+<div class="flex items-center gap-4 bg-surface-container-low px-5 py-4 rounded-xl">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">location_on</span>
+<span class="font-body text-on-surface font-semibold">Current Location</span>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-label text-[11px] uppercase tracking-[0.1em] font-bold text-on-surface-variant">Destination</span>
+<div class="flex items-center gap-4 bg-surface-container-high px-5 py-4 rounded-xl group focus-within:ring-2 ring-primary/20 transition-all">
+<span class="material-symbols-outlined text-on-surface-variant">search</span>
+<input class="bg-transparent border-none focus:ring-0 w-full font-headline text-lg font-bold text-on-surface placeholder:text-on-surface-variant/50" placeholder="Where to?" type="text"/>
+</div>
+</div>
+<!-- CTA Action -->
+<button class="w-full h-16 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-xl font-headline font-bold text-lg flex items-center justify-center gap-3 shadow-lg shadow-primary/20 active:scale-[0.98] transition-all">
+                        Find Route
+                        <span class="material-symbols-outlined">arrow_forward</span>
+</button>
+<!-- Bento Grid Suggestions -->
+<div class="grid grid-cols-2 gap-3 pt-2">
+<div class="bg-surface-container-low p-4 rounded-xl flex items-center gap-3 hover:bg-surface-container-high transition-colors cursor-pointer group">
+<div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-primary shadow-sm">
+<span class="material-symbols-outlined">home</span>
+</div>
+<div>
+<p class="text-sm font-bold text-on-surface">Home</p>
+<p class="text-[10px] text-on-surface-variant font-label uppercase">12 mins</p>
+</div>
+</div>
+<div class="bg-surface-container-low p-4 rounded-xl flex items-center gap-3 hover:bg-surface-container-high transition-colors cursor-pointer">
+<div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-primary shadow-sm">
+<span class="material-symbols-outlined">work</span>
+</div>
+<div>
+<p class="text-sm font-bold text-on-surface">Work</p>
+<p class="text-[10px] text-on-surface-variant font-label uppercase">24 mins</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Shared BottomNavBar -->
+<nav class="md:hidden fixed bottom-0 w-full z-50 bg-white dark:bg-slate-900 rounded-t-[1.5rem] shadow-[0px_-4px_24px_rgba(0,0,0,0.04)] flex justify-around items-center px-6 pb-8 pt-2">
+<!-- Explore (Active) -->
+<a class="flex flex-col items-center justify-center bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-[1.5rem] px-6 py-2 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">explore</span>
+<span class="font-['Public_Sans'] text-[11px] uppercase tracking-[0.05em] font-bold mt-1">Explore</span>
+</a>
+<!-- Settings (Inactive) -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-6 py-2 hover:text-blue-600 dark:hover:text-blue-200 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-['Public_Sans'] text-[11px] uppercase tracking-[0.05em] font-bold mt-1">Settings</span>
+</a>
+</nav>
+<!-- Desktop Floating Recent Trips (Editorial Aesthetic) -->
+<aside class="hidden lg:block fixed left-8 bottom-32 w-64 z-20">
+<div class="bg-white/80 backdrop-blur-xl p-6 rounded-xl shadow-xl shadow-black/5">
+<h3 class="font-label text-[11px] uppercase tracking-widest font-bold text-primary mb-4">Quick Access</h3>
+<ul class="space-y-4">
+<li class="flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<div>
+<p class="text-sm font-bold leading-tight">Central Park</p>
+<p class="text-[10px] text-on-surface-variant">Last visited 2h ago</p>
+</div>
+</li>
+<li class="flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<div>
+<p class="text-sm font-bold leading-tight">Grand Central</p>
+<p class="text-[10px] text-on-surface-variant">Frequent stop</p>
+</div>
+</li>
+</ul>
+</div>
+</aside>
+</body></html>

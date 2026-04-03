@@ -1,170 +1,221 @@
-import React from "react";
-import {
-  ActivityIndicator,
-  View,
-  StyleSheet,
-  TouchableOpacity,
-} from "react-native";
-import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import React from "react";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Colors } from "@/constants/theme";
+import { Kinetic } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
-import { useGraphCacheStatus } from "@/hooks/useBusApi";
-import { API_BASE_URL } from "@/config/api";
+import { useAuth } from "@/hooks/AuthContext";
+
+function SettingsCard({
+  icon,
+  title,
+  subtitle,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={0.85}
+      onPress={onPress}
+    >
+      <View style={styles.cardLeft}>
+        <View style={styles.cardIconWrap}>
+          <Ionicons name={icon} size={24} color={Kinetic.primary} />
+        </View>
+        <View style={styles.cardCopy}>
+          <ThemedText style={styles.cardTitle}>{title}</ThemedText>
+          <ThemedText style={styles.cardSubtitle}>{subtitle}</ThemedText>
+        </View>
+      </View>
+      <Ionicons
+        name="chevron-forward"
+        size={20}
+        color={Kinetic.onSurfaceVariant}
+      />
+    </TouchableOpacity>
+  );
+}
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { data: graphStatus, isLoading: graphLoading } = useGraphCacheStatus();
+  const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
-      <ThemedText type="title" style={styles.title}>
-        Settings
-      </ThemedText>
-
-      <TouchableOpacity
-        style={styles.optionCard}
-        activeOpacity={0.8}
-        onPress={() => router.push("/(settings)/routes")}
+    <View style={styles.safeArea}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: Math.max(insets.top, 12) + 12,
+            paddingBottom: Math.max(insets.bottom, 20) + 96,
+          },
+        ]}
       >
-        <View style={styles.optionContent}>
-          <Ionicons name="map-outline" size={22} color={Colors.dark.primary} />
-          <View style={styles.textWrapper}>
-            <ThemedText type="defaultSemiBold" style={styles.optionTitle}>
-              Routes
-            </ThemedText>
-            <ThemedText style={styles.optionSubtitle}>
-              Open full-screen map and filter visible routes
-            </ThemedText>
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={Colors.dark.icon} />
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.optionCard}
-        activeOpacity={0.8}
-        onPress={() => router.push("/(settings)/history")}
-      >
-        <View style={styles.optionContent}>
-          <Ionicons name="time-outline" size={22} color={Colors.dark.primary} />
-          <View style={styles.textWrapper}>
-            <ThemedText type="defaultSemiBold" style={styles.optionTitle}>
-              Travel History
-            </ThemedText>
-            <ThemedText style={styles.optionSubtitle}>
-              View and manage your computed routes
-            </ThemedText>
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={Colors.dark.icon} />
-      </TouchableOpacity>
-
-      <View style={styles.statusCard}>
-        <View style={styles.statusHeader}>
-          <Ionicons
-            name="server-outline"
-            size={18}
-            color={Colors.dark.primary}
-          />
-          <ThemedText type="defaultSemiBold" style={styles.statusTitle}>
-            Backend Graph Cache
+        <View style={styles.hero}>
+          <ThemedText style={styles.heroTitle}>Settings</ThemedText>
+          <ThemedText style={styles.heroSubtitle}>
+            Customize your movement through the city.
           </ThemedText>
         </View>
-        {graphLoading ? (
-          <View style={styles.inlineRow}>
-            <ActivityIndicator size="small" color={Colors.dark.primary} />
-            <ThemedText style={styles.optionSubtitle}>
-              Loading status...
+
+        <View style={styles.profileCard}>
+          <View style={styles.profileAvatar}>
+            <Ionicons name="person" size={24} color={Kinetic.primary} />
+          </View>
+          <View>
+            <ThemedText style={styles.profileName}>
+              {user?.username ?? "User"}
             </ThemedText>
           </View>
-        ) : (
-          <View style={styles.statusBody}>
-            <ThemedText style={styles.optionSubtitle}>
-              Loaded: {graphStatus?.isLoaded ? "Yes" : "No"}
-            </ThemedText>
-            <ThemedText style={styles.optionSubtitle}>
-              Routes: {graphStatus?.counts?.routes ?? 0} | Nodes:{" "}
-              {graphStatus?.counts?.nodes ?? 0}
-            </ThemedText>
-            <ThemedText style={styles.apiUrlText}>
-              API: {API_BASE_URL}
-            </ThemedText>
-          </View>
-        )}
-      </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionLabel}>Transportation</ThemedText>
+          <SettingsCard
+            icon="map"
+            title="Routes Map"
+            subtitle="View and toggle active bus lines"
+            onPress={() => router.push("/(settings)/routes")}
+          />
+          <SettingsCard
+            icon="options"
+            title="Preferences"
+            subtitle="Customize routing factors"
+            onPress={() => router.push("/(settings)/preferences" as never)}
+          />
+        </View>
+
+        <TouchableOpacity
+          style={styles.signOutButton}
+          activeOpacity={0.85}
+          onPress={() => {
+            void signOut();
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#BA1A1A" />
+          <ThemedText style={styles.signOutText}>Sign Out</ThemedText>
+        </TouchableOpacity>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
-    padding: 20,
-    gap: 16,
+    backgroundColor: Kinetic.surfaceLow,
   },
-  title: {
-    color: Colors.dark.text,
-    fontSize: 28,
+  content: {
+    paddingHorizontal: 24,
+    gap: 18,
   },
-  optionCard: {
-    backgroundColor: Colors.dark.surface,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    borderRadius: 12,
-    padding: 16,
+  hero: {
+    gap: 2,
+    marginBottom: 8,
+    paddingVertical: 2,
+  },
+  heroTitle: {
+    color: Kinetic.onSurface,
+    fontWeight: "900",
+    fontSize: 42,
+    lineHeight: 50,
+    letterSpacing: -1,
+  },
+  heroSubtitle: {
+    color: Kinetic.onSurfaceVariant,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  profileCard: {
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    padding: 18,
+  },
+  profileAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#dde1ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileName: {
+    color: Kinetic.onSurface,
+    fontSize: 19,
+    fontWeight: "800",
+  },
+  section: {
+    gap: 10,
+  },
+  sectionLabel: {
+    color: Kinetic.onSurfaceVariant,
+    textTransform: "uppercase",
+    letterSpacing: 1.4,
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  card: {
+    borderRadius: 22,
+    backgroundColor: Kinetic.surfaceContainer,
+    minHeight: 92,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  optionContent: {
+  cardLeft: {
     flexDirection: "row",
+    gap: 14,
     alignItems: "center",
-    gap: 12,
     flex: 1,
   },
-  textWrapper: {
+  cardIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#dde1ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardCopy: {
     flex: 1,
-    gap: 2,
   },
-  optionTitle: {
-    color: Colors.dark.text,
-    fontSize: 16,
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: Kinetic.onSurface,
   },
-  optionSubtitle: {
-    color: Colors.dark.icon,
+  cardSubtitle: {
     fontSize: 13,
+    color: Kinetic.onSurfaceVariant,
+    marginTop: 2,
   },
-  statusCard: {
-    backgroundColor: Colors.dark.surface,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    borderRadius: 12,
-    padding: 14,
-    gap: 8,
-  },
-  statusHeader: {
-    flexDirection: "row",
+  signOutButton: {
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "#ffeceb",
     alignItems: "center",
-    gap: 8,
-  },
-  statusTitle: {
-    color: Colors.dark.text,
-    fontSize: 14,
-  },
-  statusBody: {
-    gap: 2,
-  },
-  inlineRow: {
+    justifyContent: "center",
     flexDirection: "row",
-    alignItems: "center",
     gap: 8,
+    marginTop: 10,
   },
-  apiUrlText: {
-    color: Colors.dark.icon,
-    fontSize: 11,
-    marginTop: 4,
+  signOutText: {
+    color: "#BA1A1A",
+    fontWeight: "800",
+    fontSize: 16,
   },
 });
