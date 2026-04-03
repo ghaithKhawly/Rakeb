@@ -143,9 +143,10 @@ export async function buildApp() {
     <div><label>To Lng</label><input id="toLng" type="number" step="any" value="36.2862" /></div>
 
     <div><label>Max Walk (m)</label><input id="maxWalk" type="number" value="80" /></div>
-    <div><label>Max Walking Neighbors</label><input id="neighbors" type="number" value="100" /></div>
-    <div><label>Walking Speed (m/s)</label><input id="walkSpeed" type="number" step="any" value="0.4" /></div>
-    <div><label>Max Transfers</label><input id="maxTransfers" type="number" value="5" /></div>
+    <div><label>Max Total Walk (m)</label><input id="totalWalk" type="number" value="1000" /></div>
+    <div><label>Max Walking Neighbors</label><input id="neighbors" type="number" value="10" /></div>
+    <div><label>Max Transfers</label><input id="maxTransfers" type="number" value="10" /></div>
+    <div class="full"><label>Walking Speed (m/s)</label><input id="walkSpeed" type="number" step="any" value="1" /></div>
 
     <div><label>Weight: Speed</label><input id="wSpeed" type="number" step="any" value="0" /></div>
     <div><label>Weight: Crowding</label><input id="wCrowding" type="number" step="any" value="0" /></div>
@@ -173,6 +174,7 @@ export async function buildApp() {
         },
         options: {
           maxWalkingDistanceM: readNum('maxWalk'),
+          maxTotalWalkingDistanceM: readNum('totalWalk'),
           maxWalkingNeighbors: readNum('neighbors'),
           walkingSpeedMps: readNum('walkSpeed'),
           maxBusTransfers: readNum('maxTransfers')

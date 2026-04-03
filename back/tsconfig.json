@@ -2,17 +2,13 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "Node",
-    "rootDir": "..",  // ← CHANGE THIS LINE
+    "moduleResolution": "Bundler",
+    "rootDir": "..",
     "outDir": "dist",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",  // ← ADD THIS
-    "paths": {       // ← ADD THIS for clean imports
-      "@types/*": ["../types/*"]
-    }
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*", "../types/**/*"]
 }
