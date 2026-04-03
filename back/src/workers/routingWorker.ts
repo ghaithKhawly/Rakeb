@@ -588,26 +588,27 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
         if (endNeighborSet.has(currentState.nodeId)) {
           const endDistance = haversineDistanceM(currentLocation, to);
-          if (endDistance <= config.maxWalkingDistanceM) {
-            candidateEdges.push(buildWalkingEdge(
-              currentState.nodeId,
-              END_NODE_ID,
-              endDistance,
-              config,
-            ));
-          }
+          candidateEdges.push(buildWalkingEdge(
+            currentState.nodeId,
+            END_NODE_ID,
+            endDistance,
+            config,
+          ));
         }
       }
     }
 
     for (const edge of candidateEdges) {
-      if (edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
+      const isAnchorWalkingEdge = edge.mode === "walk"
+        && (edge.fromNodeId === START_NODE_ID || edge.toNodeId === END_NODE_ID);
+
+      if (!isAnchorWalkingEdge && edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
         continue;
       }
 
       const existingWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
       const projectedWalkM = existingWalkM + (edge.mode === "walk" ? edge.distanceM : 0);
-      if (projectedWalkM > config.maxTotalWalkingDistanceM) {
+      if (!isAnchorWalkingEdge && projectedWalkM > config.maxTotalWalkingDistanceM) {
         continue;
       }
 
@@ -623,6 +624,8 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
       const isLongWalkEdge = edge.mode === "walk" && edge.distanceM >= longWalkThresholdM;
       if (
+        !isAnchorWalkingEdge
+        &&
         enforceLongWalkSpacing
         && isLongWalkEdge
         && currentState.hasLongWalk
