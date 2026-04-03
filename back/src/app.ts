@@ -16,14 +16,23 @@ export async function buildApp() {
   app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
     console.log("errs", error);
     if (error.validation) {
-      const validationErrors = error.validation.map(err => ({
-        field: err.instancePath.replace('/', ''), 
-        message: err.message
-      }));
-      console.log("valerrs", validationErrors[0].message);
+      const validationContext = (error as FastifyError & { validationContext?: string }).validationContext ?? "body";
+      const validationErrors = error.validation.map((err) => {
+        const path = err.instancePath
+          ? `${validationContext}.${err.instancePath.replace(/^\//, "").split("/").join(".")}`
+          : validationContext;
+
+        return {
+          field: path,
+          message: err.message ?? "Invalid value",
+        };
+      });
+
+      const firstError = validationErrors[0];
+      console.log("valerrs", firstError);
       return reply.status(400).send({
-        error: `Validation Error ${validationErrors[0].message}`,
-        details: validationErrors[0].message
+        error: `Validation Error at ${firstError.field}: ${firstError.message}`,
+        details: validationErrors,
       });
     }
 

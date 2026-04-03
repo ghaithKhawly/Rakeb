@@ -11,17 +11,24 @@ import type {
   RoutingGraphSnapshot,
   RoutingWorkerPayload,
 } from "../../../types/navigation";
+import {
+  TRANSFER_EXP_COEFF,
+  TRANSFER_EXP_RATE,
+  TRANSFER_REF,
+  WALK_DISTANCE_REF_M,
+  WALK_EXP_COEFF,
+  WALK_EXP_SCALE_M,
+  WALK_LINEAR_COEFF,
+} from "../constants/routingConstants.js";
 
 const START_NODE_ID = -1;
 const END_NODE_ID = -2;
 
 const T_REF_SECONDS = 600;
 const P_REF_PRICE = 3000;
-const WALK_DISTANCE_REF_M = 400;
-const WALK_QUADRATIC_ALPHA = 0.6;
-const TRANSFER_REF = 1.0;
 const MAX_PLAUSIBLE_SPEED_MPS = 22.22;
 const EPSILON = 1e-9;
+const LONG_WALK_STATE_BUCKET_M = 100;
 
 type RoutingWorkerRequest = {
   id: number;
@@ -39,11 +46,16 @@ type RouteMetricsById = Map<number, RouteLiveMetricForRouting>;
 type QueueNode = {
   stateKey: string;
   fScore: number;
+  busTransferCount: number;
+  cumulativeWalkM: number;
 };
 
 type NodeState = {
   nodeId: number;
   routeId: number | null;
+  busTransferCount: number;
+  hasLongWalk: boolean;
+  busDistanceSinceLongWalkM: number;
 };
 
 type StepEdge = {
@@ -67,12 +79,23 @@ type GraphIndexes = {
   nodeById: Map<number, RoutingGraphNode>;
   routeNameById: Map<number, string>;
   busAdjacency: Map<number, RoutingGraphEdge[]>;
+  walkingAdjacency: Map<number, RoutingGraphEdge[]>;
   spatialBuckets: Map<string, number[]>;
   bucketSizeDeg: number;
 };
 
 class MinHeap {
   private items: QueueNode[] = [];
+
+  private compare(a: QueueNode, b: QueueNode): number {
+    if (Math.abs(a.fScore - b.fScore) > EPSILON) {
+      return a.fScore - b.fScore;
+    }
+    if (a.busTransferCount !== b.busTransferCount) {
+      return a.busTransferCount - b.busTransferCount;
+    }
+    return a.cumulativeWalkM - b.cumulativeWalkM;
+  }
 
   push(item: QueueNode): void {
     this.items.push(item);
@@ -100,7 +123,7 @@ class MinHeap {
     let current = index;
     while (current > 0) {
       const parent = Math.floor((current - 1) / 2);
-      if (this.items[parent].fScore <= this.items[current].fScore) {
+      if (this.compare(this.items[parent], this.items[current]) <= 0) {
         break;
       }
       [this.items[parent], this.items[current]] = [this.items[current], this.items[parent]];
@@ -116,10 +139,10 @@ class MinHeap {
       const right = current * 2 + 2;
       let smallest = current;
 
-      if (left < length && this.items[left].fScore < this.items[smallest].fScore) {
+      if (left < length && this.compare(this.items[left], this.items[smallest]) < 0) {
         smallest = left;
       }
-      if (right < length && this.items[right].fScore < this.items[smallest].fScore) {
+      if (right < length && this.compare(this.items[right], this.items[smallest]) < 0) {
         smallest = right;
       }
       if (smallest === current) {
@@ -132,15 +155,32 @@ class MinHeap {
   }
 }
 
-function makeStateKey(nodeId: number, routeId: number | null): string {
-  return `${nodeId}|${routeId ?? 0}`;
+function makeStateKey(
+  nodeId: number,
+  routeId: number | null,
+  busTransferCount: number,
+  hasLongWalk: boolean,
+  busDistanceSinceLongWalkM: number,
+): string {
+  const busDistanceBucket = Math.floor(busDistanceSinceLongWalkM / LONG_WALK_STATE_BUCKET_M);
+  return `${nodeId}|${routeId ?? 0}|${busTransferCount}|${hasLongWalk ? 1 : 0}|${busDistanceBucket}`;
 }
 
 function parseStateKey(stateKey: string): NodeState {
-  const [nodeRaw, routeRaw] = stateKey.split("|");
+  const [nodeRaw, routeRaw, transferRaw, longWalkRaw, busDistanceBucketRaw] = stateKey.split("|");
   const nodeId = Number(nodeRaw);
   const routeId = Number(routeRaw);
-  return { nodeId, routeId: routeId === 0 ? null : routeId };
+  const busTransferCount = Number(transferRaw ?? "0");
+  const busDistanceBucket = Number(busDistanceBucketRaw ?? "0");
+  return {
+    nodeId,
+    routeId: routeId === 0 ? null : routeId,
+    busTransferCount: Number.isFinite(busTransferCount) ? busTransferCount : 0,
+    hasLongWalk: longWalkRaw === "1",
+    busDistanceSinceLongWalkM: Number.isFinite(busDistanceBucket)
+      ? (busDistanceBucket * LONG_WALK_STATE_BUCKET_M)
+      : 0,
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -190,7 +230,15 @@ function buildIndexes(graph: RoutingGraphSnapshot, bucketSizeDeg: number): Graph
   }
 
   const busAdjacency = new Map<number, RoutingGraphEdge[]>();
+  const walkingAdjacency = new Map<number, RoutingGraphEdge[]>();
   for (const edge of graph.edges) {
+    if (edge.route_id === null) {
+      const currentWalk = walkingAdjacency.get(edge.from_node) ?? [];
+      currentWalk.push(edge);
+      walkingAdjacency.set(edge.from_node, currentWalk);
+      continue;
+    }
+
     const current = busAdjacency.get(edge.from_node) ?? [];
     current.push(edge);
     busAdjacency.set(edge.from_node, current);
@@ -208,6 +256,7 @@ function buildIndexes(graph: RoutingGraphSnapshot, bucketSizeDeg: number): Graph
     nodeById,
     routeNameById,
     busAdjacency,
+    walkingAdjacency,
     spatialBuckets,
     bucketSizeDeg,
   };
@@ -256,24 +305,39 @@ function findNearbyNodeIds(
   return candidates.slice(0, maxNeighbors);
 }
 
+function findAnchorNodeIds(
+  location: LocationDTO,
+  indexes: GraphIndexes,
+): Array<{ nodeId: number; distanceM: number }> {
+  const candidates: Array<{ nodeId: number; distanceM: number }> = [];
+
+  for (const node of indexes.nodeById.values()) {
+    const distanceM = haversineDistanceM(location, nodeToLocation(node));
+    candidates.push({ nodeId: node.id, distanceM });
+  }
+
+  candidates.sort((a, b) => a.distanceM - b.distanceM);
+  return candidates;
+}
+
 function buildWalkingEdge(
   fromNodeId: number,
   toNodeId: number,
   distanceM: number,
-  previousRouteId: number | null,
   config: RoutingWorkerPayload["config"],
 ): StepEdge {
   const timeSeconds = distanceM / config.walkingSpeedMps;
+  const linearCoeff = config.walkLinearCoeff ?? WALK_LINEAR_COEFF;
+  const expCoeff = config.walkExpCoeff ?? WALK_EXP_COEFF;
+  const expScaleM = config.walkExpScaleM ?? WALK_EXP_SCALE_M;
+
   const parts: RouteCostBreakdown = {
     speed: timeSeconds / T_REF_SECONDS,
     crowding: 0,
     price: 0,
     transfer: 0,
-    walking: (distanceM / WALK_DISTANCE_REF_M) + (WALK_QUADRATIC_ALPHA * ((distanceM / 1000) ** 2)),
-  };
-
-  if (previousRouteId !== null) {
-    parts.transfer = TRANSFER_REF;
+    walking: (linearCoeff * (distanceM / WALK_DISTANCE_REF_M))
+      + (expCoeff * (Math.exp(distanceM / expScaleM) - 1)),
   }
 
   return {
@@ -285,13 +349,14 @@ function buildWalkingEdge(
     timeSeconds,
     cost: computeCost(parts, config.weights),
     components: parts,
-    transferIncrement: previousRouteId !== null ? 1 : 0,
+    transferIncrement: 0,
   };
 }
 
 function buildBusEdge(
   edge: RoutingGraphEdge,
   previousRouteId: number | null,
+  accumulatedBusTransferCount: number,
   metricsByRoute: RouteMetricsById,
   config: RoutingWorkerPayload["config"],
 ): StepEdge {
@@ -310,6 +375,12 @@ function buildBusEdge(
   const transferHappened = previousRouteId !== null
     && edge.route_id !== null
     && previousRouteId !== edge.route_id;
+  const transfersAfter = accumulatedBusTransferCount + (transferHappened ? 1 : 0);
+  const transferCost = transfersAfter <= 2
+    ? 0
+    : TRANSFER_REF
+      * (config.transferExpCoeff ?? TRANSFER_EXP_COEFF)
+      * (Math.exp((config.transferExpRate ?? TRANSFER_EXP_RATE) * (transfersAfter - 2)) - 1);
 
   const boardedBus = edge.route_id !== null && previousRouteId !== edge.route_id;
   const priceBase = metrics?.effectivePrice;
@@ -321,7 +392,7 @@ function buildBusEdge(
     speed: speedComponent,
     crowding: crowdComponent,
     price: priceComponent,
-    transfer: transferHappened ? TRANSFER_REF : 0,
+    transfer: transferCost,
     walking: 0,
   };
 
@@ -385,28 +456,55 @@ function mergeComponents(
 
 function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult {
   const { graph, from, to, routeMetrics, config } = payload;
+  const walkingMode = payload.walkingMode ?? "dynamic";
+  const longWalkThresholdM = Math.max(1000, Math.min(config.maxWalkingDistanceM * 0.9, config.maxWalkingDistanceM));
+  const minBusDistanceBetweenLongWalksM = Math.max(800, config.maxTotalWalkingDistanceM * 0.25);
+  const enforceLongWalkSpacing = config.maxTotalWalkingDistanceM >= 4000 && config.maxWalkingDistanceM >= 1200;
+
+  if (haversineDistanceM(from, to) <= 1) {
+    return {
+      message: "Origin and destination are the same point",
+      executedInWorker: true,
+      graphLoadedAt: graph.loadedAt ?? null,
+      graphVersion: graph.graphVersion ?? null,
+      from,
+      to,
+      totalCost: 0,
+      components: {
+        speed: 0,
+        crowding: 0,
+        price: 0,
+        transfer: 0,
+        walking: 0,
+      },
+      transferCount: 0,
+      walkingDistanceM: 0,
+      etaSeconds: 0,
+      segments: [],
+      bestEffort: false,
+      usedConfig: config,
+    };
+  }
 
   const bucketSizeDeg = Math.max(0.0005, config.maxWalkingDistanceM / 111320);
   const indexes = buildIndexes(graph, bucketSizeDeg);
   const metricsByRoute: RouteMetricsById = new Map(routeMetrics.map((metric) => [metric.routeId, metric]));
 
-  const startNeighbors = findNearbyNodeIds(from, config.maxWalkingDistanceM, config.maxWalkingNeighbors, indexes);
-  const endNeighbors = findNearbyNodeIds(to, config.maxWalkingDistanceM, config.maxWalkingNeighbors, indexes);
+  const startNeighbors = findAnchorNodeIds(from, indexes);
+  const endNeighbors = findAnchorNodeIds(to, indexes);
   const endNeighborSet = new Set(endNeighbors.map((n) => n.nodeId));
 
-  if (startNeighbors.length === 0 || endNeighbors.length === 0) {
-    throw new Error("No reachable graph nodes found within walking radius for origin or destination");
-  }
-
-  const startStateKey = makeStateKey(START_NODE_ID, null);
+  const startStateKey = makeStateKey(START_NODE_ID, null, 0, false, 0);
   const openSet = new MinHeap();
   const gScore = new Map<string, number>();
   const fScore = new Map<string, number>();
   const parent = new Map<string, ParentInfo>();
+  const cumulativeWalkM = new Map<string, number>();
 
   gScore.set(startStateKey, 0);
+  cumulativeWalkM.set(startStateKey, 0);
   fScore.set(startStateKey, heuristicCost(from, to, config.weights.speed));
-  openSet.push({ stateKey: startStateKey, fScore: fScore.get(startStateKey) ?? 0 });
+  openSet.push({ stateKey: startStateKey, fScore: fScore.get(startStateKey) ?? 0, busTransferCount: 0, cumulativeWalkM: 0 });
 
   let finalKey: string | null = null;
 
@@ -437,58 +535,128 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
           START_NODE_ID,
           neighbor.nodeId,
           neighbor.distanceM,
-          currentState.routeId,
           config,
         ));
       }
     } else {
       const busEdges = indexes.busAdjacency.get(currentState.nodeId) ?? [];
       for (const edge of busEdges) {
-        candidateEdges.push(buildBusEdge(edge, currentState.routeId, metricsByRoute, config));
+        candidateEdges.push(buildBusEdge(
+          edge,
+          currentState.routeId,
+          currentState.busTransferCount,
+          metricsByRoute,
+          config,
+        ));
       }
 
       const currentNode = indexes.nodeById.get(currentState.nodeId);
       if (currentNode) {
         const currentLocation = nodeToLocation(currentNode);
-        const walkNeighbors = findNearbyNodeIds(
-          currentLocation,
-          config.maxWalkingDistanceM,
-          config.maxWalkingNeighbors,
-          indexes,
-        );
 
-        for (const neighbor of walkNeighbors) {
-          if (neighbor.nodeId === currentState.nodeId) {
-            continue;
+        if (walkingMode === "dynamic") {
+          const walkNeighbors = findNearbyNodeIds(
+            currentLocation,
+            config.maxWalkingDistanceM,
+            config.maxWalkingNeighbors,
+            indexes,
+          );
+
+          for (const neighbor of walkNeighbors) {
+            if (neighbor.nodeId === currentState.nodeId) {
+              continue;
+            }
+
+            candidateEdges.push(buildWalkingEdge(
+              currentState.nodeId,
+              neighbor.nodeId,
+              neighbor.distanceM,
+              config,
+            ));
           }
-
-          candidateEdges.push(buildWalkingEdge(
-            currentState.nodeId,
-            neighbor.nodeId,
-            neighbor.distanceM,
-            currentState.routeId,
-            config,
-          ));
+        } else {
+          const precomputedWalkEdges = indexes.walkingAdjacency.get(currentState.nodeId) ?? [];
+          for (const walkEdge of precomputedWalkEdges) {
+            candidateEdges.push(buildWalkingEdge(
+              walkEdge.from_node,
+              walkEdge.to_node,
+              walkEdge.distance_km * 1000,
+              config,
+            ));
+          }
         }
 
         if (endNeighborSet.has(currentState.nodeId)) {
           const endDistance = haversineDistanceM(currentLocation, to);
-          if (endDistance <= config.maxWalkingDistanceM) {
-            candidateEdges.push(buildWalkingEdge(
-              currentState.nodeId,
-              END_NODE_ID,
-              endDistance,
-              currentState.routeId,
-              config,
-            ));
-          }
+          candidateEdges.push(buildWalkingEdge(
+            currentState.nodeId,
+            END_NODE_ID,
+            endDistance,
+            config,
+          ));
         }
       }
     }
 
     for (const edge of candidateEdges) {
+      const isAnchorWalkingEdge = edge.mode === "walk"
+        && (edge.fromNodeId === START_NODE_ID || edge.toNodeId === END_NODE_ID);
+
+      if (!isAnchorWalkingEdge && edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
+        continue;
+      }
+
+      const existingWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
+      const projectedWalkM = existingWalkM + (edge.mode === "walk" ? edge.distanceM : 0);
+      if (!isAnchorWalkingEdge && projectedWalkM > config.maxTotalWalkingDistanceM) {
+        continue;
+      }
+
+      if (
+        edge.mode === "bus"
+        && edge.transferIncrement > 0
+        && currentState.busTransferCount >= config.maxBusTransfers
+      ) {
+        continue;
+      }
+
+      const nextBusTransferCount = currentState.busTransferCount + edge.transferIncrement;
+
+      const isLongWalkEdge = edge.mode === "walk" && edge.distanceM >= longWalkThresholdM;
+      if (
+        !isAnchorWalkingEdge
+        &&
+        enforceLongWalkSpacing
+        && isLongWalkEdge
+        && currentState.hasLongWalk
+        && currentState.busDistanceSinceLongWalkM + EPSILON < minBusDistanceBetweenLongWalksM
+      ) {
+        continue;
+      }
+
+      let nextHasLongWalk = currentState.hasLongWalk;
+      let nextBusDistanceSinceLongWalkM = currentState.busDistanceSinceLongWalkM;
+
+      if (edge.mode === "bus") {
+        if (currentState.hasLongWalk) {
+          nextBusDistanceSinceLongWalkM = Math.min(
+            currentState.busDistanceSinceLongWalkM + edge.distanceM,
+            minBusDistanceBetweenLongWalksM,
+          );
+        }
+      } else if (isLongWalkEdge) {
+        nextHasLongWalk = true;
+        nextBusDistanceSinceLongWalkM = 0;
+      }
+
       const nextRouteId = edge.mode === "bus" ? edge.routeId : null;
-      const nextStateKey = makeStateKey(edge.toNodeId, nextRouteId);
+      const nextStateKey = makeStateKey(
+        edge.toNodeId,
+        nextRouteId,
+        nextBusTransferCount,
+        nextHasLongWalk,
+        nextBusDistanceSinceLongWalkM,
+      );
       const tentativeG = currentG + edge.cost;
 
       const knownG = gScore.get(nextStateKey);
@@ -497,6 +665,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       }
 
       gScore.set(nextStateKey, tentativeG);
+      cumulativeWalkM.set(nextStateKey, projectedWalkM);
       parent.set(nextStateKey, {
         previousStateKey: current.stateKey, 
         edge,
@@ -509,7 +678,12 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       const nextF = tentativeG + h;
 
       fScore.set(nextStateKey, nextF);
-      openSet.push({ stateKey: nextStateKey, fScore: nextF });
+      openSet.push({
+        stateKey: nextStateKey,
+        fScore: nextF,
+        busTransferCount: nextBusTransferCount,
+        cumulativeWalkM: projectedWalkM,
+      });
     }
   }
 
@@ -574,6 +748,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     message: "Weighted A* route computed in worker",
     executedInWorker: true,
     graphLoadedAt: graph.loadedAt ?? null,
+    graphVersion: graph.graphVersion ?? null,
     from,
     to,
     totalCost,
@@ -582,6 +757,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     walkingDistanceM,
     etaSeconds,
     segments,
+    bestEffort: false,
     usedConfig: config,
   };
 }

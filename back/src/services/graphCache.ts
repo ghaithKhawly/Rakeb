@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 type RouteRow = {
@@ -39,7 +41,8 @@ export type GraphSnapshot = {
   nodes: NodeRow[];
   edges: EdgeRow[];
   routeNodes: RouteNodeRow[];
-  loadedAt: string;
+  loadedAt: string | null;
+  graphVersion: string | null;
 };
 
 type RebuildStatus = {
@@ -142,6 +145,7 @@ class GraphCacheService {
     return {
       isLoaded: this.snapshot !== null,
       loadedAt: this.snapshot?.loadedAt ?? null,
+      graphVersion: this.snapshot?.graphVersion ?? null,
       lastInvalidatedAt: this.lastInvalidatedAt,
       rebuild: this.rebuildStatus,
       counts: this.snapshot
@@ -264,16 +268,46 @@ class GraphCacheService {
         "SELECT route_id, node_id, sequence_order FROM route_nodes ORDER BY route_id, sequence_order",
       );
 
+      const graphVersion = await this.computeGraphVersion();
+
       return {
         routes: routesResult.rows,
         nodes: nodesResult.rows,
         edges: edgesResult.rows,
         routeNodes: routeNodesResult.rows,
         loadedAt: new Date().toISOString(),
+        graphVersion,
       };
     } finally {
       client.release();
     }
+  }
+
+  private async computeGraphVersion(): Promise<string | null> {
+    const kmzPaths = (process.env.GRAPH_KMZ_FILES
+      ?? path.resolve(process.cwd(), "../script/busses.kmz"))
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (kmzPaths.length === 0) {
+      return null;
+    }
+
+    const hasher = createHash("sha256");
+    let hashedAny = false;
+
+    for (const kmzPath of kmzPaths) {
+      if (!existsSync(kmzPath)) {
+        continue;
+      }
+      const content = await readFile(kmzPath);
+      hasher.update(kmzPath);
+      hasher.update(content);
+      hashedAny = true;
+    }
+
+    return hashedAny ? hasher.digest("hex") : null;
   }
 }
 
