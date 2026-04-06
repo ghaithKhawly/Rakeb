@@ -1,0 +1,1618 @@
+{
+  "summary": {
+    "totalCases": 60,
+    "successfulRoutes": 60,
+    "routesWithAnyIssue": 48,
+    "routesWithHighSeverityIssue": 34,
+    "avgIssuesPerSuccessfulRoute": 1.1666666666666667,
+    "issueTypeCounts": {
+      "transfer_near_destination": 2,
+      "long_walk_where_bus_lines_exist_nearby": 30,
+      "high_detour_ratio": 11,
+      "bus_backtracking_away_from_destination": 8,
+      "possible_needless_transfer": 6,
+      "very_short_post_transfer_bus_segment": 12,
+      "many_transfers": 1
+    }
+  },
+  "rows": [
+    {
+      "name": "short-1",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51380221862955,
+        "lng": 36.31502398101021
+      },
+      "to": {
+        "lat": 33.49923725291958,
+        "lng": 36.3003148169572
+      },
+      "directDistanceM": 2117.276701476767,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 472.53092930611115,
+      "etaSeconds": 857.5017458340778,
+      "detourRatio": 1.4858423441880548,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "short-2",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50750303733662,
+        "lng": 36.26603984880445
+      },
+      "to": {
+        "lat": 33.51746347742615,
+        "lng": 36.29141657043667
+      },
+      "directDistanceM": 2600.3482753271805,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 346.2549865560269,
+      "etaSeconds": 760.1276327296775,
+      "detourRatio": 1.2384381798161115,
+      "issues": [
+        {
+          "type": "transfer_near_destination",
+          "severity": "high",
+          "details": "remaining 498m, next bus segment 422m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-3",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50938983502514,
+        "lng": 36.28911894673029
+      },
+      "to": {
+        "lat": 33.49181824908959,
+        "lng": 36.30111788250252
+      },
+      "directDistanceM": 2248.4321210612675,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 692.9972143182491,
+      "etaSeconds": 1067.264117067311,
+      "detourRatio": 1.4641638041977143,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 651m, nearby lines start=20m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-4",
+      "bucket": "short",
+      "from": {
+        "lat": 33.52681620027964,
+        "lng": 36.30188191000519
+      },
+      "to": {
+        "lat": 33.5035056538041,
+        "lng": 36.31642299438143
+      },
+      "directDistanceM": 2921.6143528785706,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 567.0347284516272,
+      "etaSeconds": 1497.0967664307605,
+      "detourRatio": 2.404766006903755,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.40x vs direct distance"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 362m, nearby lines start=3m end=0m"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 796m"
+        },
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 0 vs 1 with eta delta 2.5%"
+        }
+      ],
+      "severityScore": 10
+    },
+    {
+      "name": "short-5",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51348943331134,
+        "lng": 36.31527930954537
+      },
+      "to": {
+        "lat": 33.50574974660412,
+        "lng": 36.31509727150559
+      },
+      "directDistanceM": 860.7793700499177,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 293.1463074892686,
+      "etaSeconds": 427.9140654511327,
+      "detourRatio": 1.4278147900855196,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "short-6",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51494839141241,
+        "lng": 36.30002846742498
+      },
+      "to": {
+        "lat": 33.50994450639251,
+        "lng": 36.280863678057
+      },
+      "directDistanceM": 1861.8614833959102,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 139.2212645975659,
+      "etaSeconds": 530.7262989193574,
+      "detourRatio": 1.5350262361906493,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 330m / 47s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "short-7",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50296869458329,
+        "lng": 36.23958818134631
+      },
+      "to": {
+        "lat": 33.50545922627605,
+        "lng": 36.25554925475864
+      },
+      "directDistanceM": 1505.5889784988,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 444.75399684041633,
+      "etaSeconds": 823.3835492843059,
+      "detourRatio": 2.041809506255177,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.04x vs direct distance"
+        },
+        {
+          "type": "transfer_near_destination",
+          "severity": "high",
+          "details": "remaining 439m, next bus segment 442m"
+        }
+      ],
+      "severityScore": 5
+    },
+    {
+      "name": "short-8",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51781605860339,
+        "lng": 36.2637008206069
+      },
+      "to": {
+        "lat": 33.51115932427695,
+        "lng": 36.28899709186791
+      },
+      "directDistanceM": 2459.2147792087294,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 282.0247775641767,
+      "etaSeconds": 710.0449632769718,
+      "detourRatio": 1.323344022596757,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "short-9",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51585875984439,
+        "lng": 36.26645171077802
+      },
+      "to": {
+        "lat": 33.50745603334064,
+        "lng": 36.26625262616808
+      },
+      "directDistanceM": 934.5228476605695,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 945.5983285174461,
+      "etaSeconds": 945.5983285174461,
+      "detourRatio": 1.0118514821596951,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 946m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-10",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51112745479598,
+        "lng": 36.27779018266891
+      },
+      "to": {
+        "lat": 33.51781605860339,
+        "lng": 36.2637008206069
+      },
+      "directDistanceM": 1503.1002858871777,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 477.1492096576806,
+      "etaSeconds": 695.625548463384,
+      "detourRatio": 1.3268216536479358,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "short-11",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51826009840538,
+        "lng": 36.31238647402851
+      },
+      "to": {
+        "lat": 33.49753702650841,
+        "lng": 36.30488054296393
+      },
+      "directDistanceM": 2407.093467016717,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 621.8157568538461,
+      "etaSeconds": 1117.3914367567015,
+      "detourRatio": 1.6880580624037687,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 254m / 37s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "short-12",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51306954979308,
+        "lng": 36.28921070608423
+      },
+      "to": {
+        "lat": 33.49865337573704,
+        "lng": 36.29972421101117
+      },
+      "directDistanceM": 1876.1225475320646,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1011.2677128009256,
+      "etaSeconds": 1218.715667690935,
+      "detourRatio": 1.3068861167270356,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 851m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-13",
+      "bucket": "short",
+      "from": {
+        "lat": 33.52681620027964,
+        "lng": 36.30188191000519
+      },
+      "to": {
+        "lat": 33.50092835526107,
+        "lng": 36.30955739779276
+      },
+      "directDistanceM": 2965.244798661367,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 587.8964008835928,
+      "etaSeconds": 1587.3393480639606,
+      "detourRatio": 2.5389041830098273,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.54x vs direct distance"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 1207m"
+        }
+      ],
+      "severityScore": 4
+    },
+    {
+      "name": "short-14",
+      "bucket": "short",
+      "from": {
+        "lat": 33.52991395593859,
+        "lng": 36.2900493434453
+      },
+      "to": {
+        "lat": 33.52020123699327,
+        "lng": 36.29859176186288
+      },
+      "directDistanceM": 1339.196803001091,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 694.1813288501379,
+      "etaSeconds": 835.6868670929179,
+      "detourRatio": 1.2521376051679283,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 400m, nearby lines start=0m end=3m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-15",
+      "bucket": "short",
+      "from": {
+        "lat": 33.4953926794666,
+        "lng": 36.27617489944241
+      },
+      "to": {
+        "lat": 33.50659118985561,
+        "lng": 36.25479128783104
+      },
+      "directDistanceM": 2341.336914013548,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1343.7144525857357,
+      "etaSeconds": 1669.8305588204694,
+      "detourRatio": 1.5411748788369832,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 1095m, nearby lines start=3m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "short-16",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50564782324159,
+        "lng": 36.2559500526162
+      },
+      "to": {
+        "lat": 33.48977323791354,
+        "lng": 36.23514233357418
+      },
+      "directDistanceM": 2615.0547303109897,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1038.7766715060886,
+      "etaSeconds": 1712.2250044949785,
+      "detourRatio": 2.1856143735360574,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.19x vs direct distance"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 994m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 5
+    },
+    {
+      "name": "short-17",
+      "bucket": "short",
+      "from": {
+        "lat": 33.53846514913889,
+        "lng": 36.33579430949031
+      },
+      "to": {
+        "lat": 33.53056738894803,
+        "lng": 36.32369244017351
+      },
+      "directDistanceM": 1424.5685064433253,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 166.46883082415587,
+      "etaSeconds": 384.6952865096966,
+      "detourRatio": 1.1806594916517092,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "short-18",
+      "bucket": "short",
+      "from": {
+        "lat": 33.51360443263634,
+        "lng": 36.31614465396429
+      },
+      "to": {
+        "lat": 33.51746347742615,
+        "lng": 36.29141657043667
+      },
+      "directDistanceM": 2332.2865548517475,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 286.6034967682248,
+      "etaSeconds": 976.7678261505473,
+      "detourRatio": 2.1778676077065042,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.18x vs direct distance"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "short-19",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50191142642625,
+        "lng": 36.3182199545675
+      },
+      "to": {
+        "lat": 33.49832779473377,
+        "lng": 36.32987254069452
+      },
+      "directDistanceM": 1151.6102315855899,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 253.54629485422137,
+      "etaSeconds": 537.1109263737989,
+      "detourRatio": 1.9301192920029113,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 1.93x vs direct distance"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "short-20",
+      "bucket": "short",
+      "from": {
+        "lat": 33.50296869458329,
+        "lng": 36.23958818134631
+      },
+      "to": {
+        "lat": 33.51106866718838,
+        "lng": 36.26249980765537
+      },
+      "directDistanceM": 2307.3345927006458,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 357.32181701111426,
+      "etaSeconds": 755.5772858402853,
+      "detourRatio": 1.3535032174662351,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "medium-1",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52991395593859,
+        "lng": 36.2900493434453
+      },
+      "to": {
+        "lat": 33.50745603334064,
+        "lng": 36.26625262616808
+      },
+      "directDistanceM": 3332.069626913988,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 711.8165685516999,
+      "etaSeconds": 1352.3851440547396,
+      "detourRatio": 1.5486499478609717,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 396m, nearby lines start=0m end=7m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-2",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.5370650479446,
+        "lng": 36.33122256185257
+      },
+      "to": {
+        "lat": 33.49029463416977,
+        "lng": 36.32563524104531
+      },
+      "directDistanceM": 5226.365921313596,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 426.26612037022596,
+      "etaSeconds": 1294.6668662273244,
+      "detourRatio": 1.2354333685587224,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 232m / 33s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "medium-3",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.51115932427695,
+        "lng": 36.28899709186791
+      },
+      "to": {
+        "lat": 33.48429773967148,
+        "lng": 36.22089216692389
+      },
+      "directDistanceM": 6985.851230170626,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1371.9334336891284,
+      "etaSeconds": 2732.2887380795873,
+      "detourRatio": 1.548679597270745,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 1170m, nearby lines start=10m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-4",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.50972698627707,
+        "lng": 36.28839170087674
+      },
+      "to": {
+        "lat": 33.46576489825151,
+        "lng": 36.27744042112268
+      },
+      "directDistanceM": 4992.744259857737,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 892.3580199893839,
+      "etaSeconds": 1820.9006799156682,
+      "detourRatio": 1.4702477343298366,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 624m, nearby lines start=1m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-5",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.5089292880321,
+        "lng": 36.31873991444793
+      },
+      "to": {
+        "lat": 33.50296869458329,
+        "lng": 36.23958818134631
+      },
+      "directDistanceM": 7368.619166682058,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 780.7976432253929,
+      "etaSeconds": 2171.3204360369696,
+      "detourRatio": 1.4164398635000675,
+      "issues": [
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 0 vs 1 with eta delta 5.1%"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-6",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.53119804201098,
+        "lng": 36.32396292603991
+      },
+      "to": {
+        "lat": 33.4953926794666,
+        "lng": 36.27617489944241
+      },
+      "directDistanceM": 5956.498722564362,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 366.750251125147,
+      "etaSeconds": 1524.9671007960299,
+      "detourRatio": 1.4118903083829524,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "medium-7",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.50912716113647,
+        "lng": 36.25865704264042
+      },
+      "to": {
+        "lat": 33.49181824908959,
+        "lng": 36.30111788250252
+      },
+      "directDistanceM": 4382.371388360875,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 993.1171116645684,
+      "etaSeconds": 1807.841988272912,
+      "detourRatio": 1.5176552065948232,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 295m / 42s"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 644m, nearby lines start=8m end=0m"
+        }
+      ],
+      "severityScore": 5
+    },
+    {
+      "name": "medium-8",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.51043210933234,
+        "lng": 36.27772157468451
+      },
+      "to": {
+        "lat": 33.504008184882,
+        "lng": 36.3173471173708
+      },
+      "directDistanceM": 3742.7232320427283,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 484.81805818093636,
+      "etaSeconds": 1168.1285701716197,
+      "detourRatio": 1.3973862406466657,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 354m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-9",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.45525893293841,
+        "lng": 36.2715079157068
+      },
+      "to": {
+        "lat": 33.49616395439732,
+        "lng": 36.30619621573166
+      },
+      "directDistanceM": 5571.307857353619,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1087.8192865900105,
+      "etaSeconds": 2015.7302697213813,
+      "detourRatio": 1.3518631084790178,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 677m, nearby lines start=0m end=1m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-10",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52025400167233,
+        "lng": 36.29071542462098
+      },
+      "to": {
+        "lat": 33.50558669856182,
+        "lng": 36.25549468338574
+      },
+      "directDistanceM": 3649.9616481124917,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 505.02252819714744,
+      "etaSeconds": 1220.3242871333384,
+      "detourRatio": 1.4993022891001782,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "medium-11",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.49194042874643,
+        "lng": 36.28691125406705
+      },
+      "to": {
+        "lat": 33.52923522000585,
+        "lng": 36.32284981561058
+      },
+      "directDistanceM": 5319.72386811225,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 543.3387101076241,
+      "etaSeconds": 1533.3008794739637,
+      "detourRatio": 1.3944475655662634,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "medium-12",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52707053799845,
+        "lng": 36.22304196417301
+      },
+      "to": {
+        "lat": 33.508194167094,
+        "lng": 36.28914892460575
+      },
+      "directDistanceM": 6477.920158268884,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 6480.05591995557,
+      "etaSeconds": 6480.05591995557,
+      "detourRatio": 1.000329698674035,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 6480m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-13",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.50994450639251,
+        "lng": 36.280863678057
+      },
+      "to": {
+        "lat": 33.50296869458329,
+        "lng": 36.23958818134631
+      },
+      "directDistanceM": 3904.757222692103,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 725.959246903531,
+      "etaSeconds": 1348.6815606770974,
+      "detourRatio": 1.2934017331141512,
+      "issues": [
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 0 vs 1 with eta delta 8.1%"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-14",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52939602192256,
+        "lng": 36.24261310090179
+      },
+      "to": {
+        "lat": 33.5037877461947,
+        "lng": 36.32005644945466
+      },
+      "directDistanceM": 7723.542452883915,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 586.0950155133671,
+      "etaSeconds": 3318.366300824872,
+      "detourRatio": 2.5325427137655314,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.53x vs direct distance"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 1596m"
+        },
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 0 vs 1 with eta delta 1.1%"
+        }
+      ],
+      "severityScore": 7
+    },
+    {
+      "name": "medium-15",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.49160267400583,
+        "lng": 36.28988338946131
+      },
+      "to": {
+        "lat": 33.52075192477281,
+        "lng": 36.29034752331674
+      },
+      "directDistanceM": 3241.5344585916255,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 740.3656349407643,
+      "etaSeconds": 1239.6983361621205,
+      "detourRatio": 1.298136389299749,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 320m / 46s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "medium-16",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.5218190017957,
+        "lng": 36.30102856335662
+      },
+      "to": {
+        "lat": 33.48118948796476,
+        "lng": 36.28987510469869
+      },
+      "directDistanceM": 4634.65150289627,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 563.7301440621471,
+      "etaSeconds": 2172.91995145867,
+      "detourRatio": 2.5328030283955267,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 2.53x vs direct distance"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 2055m"
+        }
+      ],
+      "severityScore": 4
+    },
+    {
+      "name": "medium-17",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52560286313881,
+        "lng": 36.27375276541238
+      },
+      "to": {
+        "lat": 33.50127833385216,
+        "lng": 36.30679826428865
+      },
+      "directDistanceM": 4086.7570146077337,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 984.4027818808974,
+      "etaSeconds": 1959.463209009165,
+      "detourRatio": 1.8977530888984966,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 1.90x vs direct distance"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 442m, nearby lines start=4m end=0m"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 528m"
+        }
+      ],
+      "severityScore": 7
+    },
+    {
+      "name": "medium-18",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.49391120573817,
+        "lng": 36.24284347994885
+      },
+      "to": {
+        "lat": 33.50382811350554,
+        "lng": 36.31792891147535
+      },
+      "directDistanceM": 7049.08706354954,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 847.6463301960428,
+      "etaSeconds": 2196.143397543874,
+      "detourRatio": 1.4487279282867869,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 411m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "medium-19",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.48384595803471,
+        "lng": 36.29193895813602
+      },
+      "to": {
+        "lat": 33.48254847837566,
+        "lng": 36.34095916900439
+      },
+      "directDistanceM": 4548.514500844333,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 186.55322425153005,
+      "etaSeconds": 1374.8087721181153,
+      "detourRatio": 1.8551832385381062,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 1.86x vs direct distance"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "medium-20",
+      "bucket": "medium",
+      "from": {
+        "lat": 33.52251085590601,
+        "lng": 36.30013022259708
+      },
+      "to": {
+        "lat": 33.48113363066317,
+        "lng": 36.3556971744627
+      },
+      "directDistanceM": 6907.572328544045,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 440.43947022493217,
+      "etaSeconds": 2106.729574290672,
+      "detourRatio": 1.7389464713384832,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "long-1",
+      "bucket": "long",
+      "from": {
+        "lat": 33.52523512712928,
+        "lng": 36.30202576399541
+      },
+      "to": {
+        "lat": 33.42909976082458,
+        "lng": 36.25480869899535
+      },
+      "directDistanceM": 11552.028607272994,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1336.1551645056306,
+      "etaSeconds": 3849.9934498421794,
+      "detourRatio": 1.6268454760846711,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 840m, nearby lines start=1m end=0m"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 1844m"
+        }
+      ],
+      "severityScore": 5
+    },
+    {
+      "name": "long-2",
+      "bucket": "long",
+      "from": {
+        "lat": 33.37129620929462,
+        "lng": 36.3300141634037
+      },
+      "to": {
+        "lat": 33.53792725921886,
+        "lng": 36.33707549058231
+      },
+      "directDistanceM": 18540.104573760953,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 18554.496676338473,
+      "etaSeconds": 18554.496676338473,
+      "detourRatio": 1.0007762686839365,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 18554m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-3",
+      "bucket": "long",
+      "from": {
+        "lat": 33.44832569528194,
+        "lng": 36.16751192306139
+      },
+      "to": {
+        "lat": 33.45525893293841,
+        "lng": 36.2715079157068
+      },
+      "directDistanceM": 9679.029311301554,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 11486.569792419268,
+      "etaSeconds": 11486.569792419268,
+      "detourRatio": 1.1867481152275436,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 11487m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-4",
+      "bucket": "long",
+      "from": {
+        "lat": 33.38916511436384,
+        "lng": 36.25396693736806
+      },
+      "to": {
+        "lat": 33.50526898860913,
+        "lng": 36.24829793195077
+      },
+      "directDistanceM": 12920.87164098198,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 959.1826413584805,
+      "etaSeconds": 3769.4591741422773,
+      "detourRatio": 1.5846447875745182,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 295m / 42s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "long-5",
+      "bucket": "long",
+      "from": {
+        "lat": 33.54628762597198,
+        "lng": 36.31866683438257
+      },
+      "to": {
+        "lat": 33.43286567600578,
+        "lng": 36.25790328219384
+      },
+      "directDistanceM": 13813.520738703503,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 999.2463886723322,
+      "etaSeconds": 3452.334390565219,
+      "detourRatio": 1.3055744495768125,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "long-6",
+      "bucket": "long",
+      "from": {
+        "lat": 33.48810407145727,
+        "lng": 36.32799633684528
+      },
+      "to": {
+        "lat": 33.38894796963352,
+        "lng": 36.25226047404006
+      },
+      "directDistanceM": 13074.818615945245,
+      "status": 200,
+      "transferCount": 1,
+      "walkingDistanceM": 515.4844416815663,
+      "etaSeconds": 2907.958228662437,
+      "detourRatio": 1.3101432794845258,
+      "issues": [
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 0 vs 1 with eta delta 8.3%"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-7",
+      "bucket": "long",
+      "from": {
+        "lat": 33.35429590887568,
+        "lng": 36.24926818010125
+      },
+      "to": {
+        "lat": 33.52145435413436,
+        "lng": 36.2830499958142
+      },
+      "directDistanceM": 18849.636547737748,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1625.3432826078188,
+      "etaSeconds": 4518.732859905231,
+      "detourRatio": 1.1521880755250333,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 1341m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-8",
+      "bucket": "long",
+      "from": {
+        "lat": 33.36025988075158,
+        "lng": 36.24786062062214
+      },
+      "to": {
+        "lat": 33.52714477329292,
+        "lng": 36.29139944953687
+      },
+      "directDistanceM": 18991.375563343183,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 795.2418033655547,
+      "etaSeconds": 3781.88181755484,
+      "detourRatio": 1.1339777566731828,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 320m / 46s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "long-9",
+      "bucket": "long",
+      "from": {
+        "lat": 33.38878045387251,
+        "lng": 36.25175883798816
+      },
+      "to": {
+        "lat": 33.49186273741355,
+        "lng": 36.29306053614075
+      },
+      "directDistanceM": 12085.90484140968,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 277.14078463282135,
+      "etaSeconds": 2137.928791564155,
+      "detourRatio": 1.0921217645559775,
+      "issues": [],
+      "severityScore": 0
+    },
+    {
+      "name": "long-10",
+      "bucket": "long",
+      "from": {
+        "lat": 33.4697563110552,
+        "lng": 36.20209188768012
+      },
+      "to": {
+        "lat": 33.49979771858821,
+        "lng": 36.29449527939664
+      },
+      "directDistanceM": 9197.557178311688,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 9446.145991305766,
+      "etaSeconds": 9446.145991305766,
+      "detourRatio": 1.0270276996570635,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 9446m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-11",
+      "bucket": "long",
+      "from": {
+        "lat": 33.42909976082458,
+        "lng": 36.25480869899535
+      },
+      "to": {
+        "lat": 33.5140451314368,
+        "lng": 36.27549020956467
+      },
+      "directDistanceM": 9638.321028600612,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1465.1815153187422,
+      "etaSeconds": 3097.7062407276694,
+      "detourRatio": 1.3282561077924282,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 295m / 42s"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 840m, nearby lines start=0m end=1m"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 487m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 8
+    },
+    {
+      "name": "long-12",
+      "bucket": "long",
+      "from": {
+        "lat": 33.53074889235067,
+        "lng": 36.23514615186001
+      },
+      "to": {
+        "lat": 33.46567419032185,
+        "lng": 36.36458530907519
+      },
+      "directDistanceM": 14014.83713813534,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1244.7039009926525,
+      "etaSeconds": 3686.3293145109405,
+      "detourRatio": 1.2986548298723684,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 304m / 44s"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 534m, nearby lines start=0m end=4m"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 414m, nearby lines start=7m end=0m"
+        }
+      ],
+      "severityScore": 8
+    },
+    {
+      "name": "long-13",
+      "bucket": "long",
+      "from": {
+        "lat": 33.52075192477281,
+        "lng": 36.29034752331674
+      },
+      "to": {
+        "lat": 33.3867248556591,
+        "lng": 36.25182340360458
+      },
+      "directDistanceM": 15325.692336009513,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 574.9244205271756,
+      "etaSeconds": 2985.970925500967,
+      "detourRatio": 1.130017655815668,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 320m / 46s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "long-14",
+      "bucket": "long",
+      "from": {
+        "lat": 33.51144831624733,
+        "lng": 36.2632384321747
+      },
+      "to": {
+        "lat": 33.43549984439448,
+        "lng": 36.39228288397545
+      },
+      "directDistanceM": 14648.561008843903,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 653.9106294474436,
+      "etaSeconds": 3222.585400864326,
+      "detourRatio": 1.2623717690927954,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 304m / 44s"
+        }
+      ],
+      "severityScore": 2
+    },
+    {
+      "name": "long-15",
+      "bucket": "long",
+      "from": {
+        "lat": 33.40457994653064,
+        "lng": 36.24788523289126
+      },
+      "to": {
+        "lat": 33.48986317649911,
+        "lng": 36.26072673863145
+      },
+      "directDistanceM": 9557.614877404536,
+      "status": 200,
+      "transferCount": 2,
+      "walkingDistanceM": 1661.3918093712762,
+      "etaSeconds": 4000.8932528501346,
+      "detourRatio": 1.8736818590215953,
+      "issues": [
+        {
+          "type": "high_detour_ratio",
+          "severity": "medium",
+          "details": "detour ratio 1.87x vs direct distance"
+        },
+        {
+          "type": "many_transfers",
+          "severity": "medium",
+          "details": "transferCount=2"
+        },
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 1321m, nearby lines start=0m end=0m"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 1680m"
+        },
+        {
+          "type": "possible_needless_transfer",
+          "severity": "high",
+          "details": "alt transfers 1 vs 2 with eta delta -5.1%"
+        }
+      ],
+      "severityScore": 12
+    },
+    {
+      "name": "long-16",
+      "bucket": "long",
+      "from": {
+        "lat": 33.40519563447712,
+        "lng": 36.24721467399215
+      },
+      "to": {
+        "lat": 33.5027599808105,
+        "lng": 36.28709862174027
+      },
+      "directDistanceM": 11462.31216991058,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 510.2412415671498,
+      "etaSeconds": 2976.1688012330583,
+      "detourRatio": 1.5384974621424121,
+      "issues": [
+        {
+          "type": "very_short_post_transfer_bus_segment",
+          "severity": "medium",
+          "details": "next bus 295m / 42s"
+        },
+        {
+          "type": "bus_backtracking_away_from_destination",
+          "severity": "medium",
+          "details": "distance-to-destination increased by 1983m"
+        }
+      ],
+      "severityScore": 4
+    },
+    {
+      "name": "long-17",
+      "bucket": "long",
+      "from": {
+        "lat": 33.53900911483063,
+        "lng": 36.33837384877525
+      },
+      "to": {
+        "lat": 33.43999064400373,
+        "lng": 36.1669435697672
+      },
+      "directDistanceM": 19338.08561765832,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1435.030847128987,
+      "etaSeconds": 5568.452777375212,
+      "detourRatio": 1.558548783114853,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 805m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-18",
+      "bucket": "long",
+      "from": {
+        "lat": 33.537737873076,
+        "lng": 36.33751254114853
+      },
+      "to": {
+        "lat": 33.44397948430895,
+        "lng": 36.27130477360242
+      },
+      "directDistanceM": 12099.00471987131,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 1285.9402938756593,
+      "etaSeconds": 3304.4166754015723,
+      "detourRatio": 1.2648261358780912,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 739m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-19",
+      "bucket": "long",
+      "from": {
+        "lat": 33.50817743021109,
+        "lng": 36.25335607972795
+      },
+      "to": {
+        "lat": 33.35702615669074,
+        "lng": 36.24735359801774
+      },
+      "directDistanceM": 16816.482050650247,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 865.0164490684192,
+      "etaSeconds": 4004.657484860116,
+      "detourRatio": 1.34796797150242,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 462m, nearby lines start=0m end=1m"
+        }
+      ],
+      "severityScore": 3
+    },
+    {
+      "name": "long-20",
+      "bucket": "long",
+      "from": {
+        "lat": 33.52979507612454,
+        "lng": 36.21311333402527
+      },
+      "to": {
+        "lat": 33.46009308279145,
+        "lng": 36.27581649027751
+      },
+      "directDistanceM": 9689.05738115474,
+      "status": 200,
+      "transferCount": 0,
+      "walkingDistanceM": 9689.49507849771,
+      "etaSeconds": 9689.49507849771,
+      "detourRatio": 1.0000451743988865,
+      "issues": [
+        {
+          "type": "long_walk_where_bus_lines_exist_nearby",
+          "severity": "high",
+          "details": "walk 9689m, nearby lines start=0m end=0m"
+        }
+      ],
+      "severityScore": 3
+    }
+  ]
+}

@@ -28,6 +28,7 @@ type EdgeRow = {
   route_id: number | null;
   travel_time: number;
   distance_km: number;
+  geom: string | null;
 };
 
 type RouteNodeRow = {
@@ -262,7 +263,7 @@ class GraphCacheService {
         "SELECT id, latitude, longitude FROM nodes ORDER BY id",
       );
       const edgesResult = await client.query<EdgeRow>(
-        "SELECT id, from_node, to_node, route_id, travel_time, distance_km FROM edges ORDER BY id",
+        "SELECT id, from_node, to_node, route_id, travel_time, distance_km, ST_AsGeoJSON(geom) AS geom FROM edges ORDER BY id",
       );
       const routeNodesResult = await client.query<RouteNodeRow>(
         "SELECT route_id, node_id, sequence_order FROM route_nodes ORDER BY route_id, sequence_order",

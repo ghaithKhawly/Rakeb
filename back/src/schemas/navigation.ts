@@ -88,13 +88,18 @@ export const navigationRouteSchema = {
           type: "array",
           items: {
             type: "object",
-            required: ["mode", "routeId", "routeName", "from", "to", "distanceM", "timeSeconds", "cost"],
+            required: ["mode", "routeId", "routeName", "from", "to", "coordinates", "distanceM", "timeSeconds", "cost"],
             properties: {
               mode: { type: "string", enum: ["walk", "bus"] },
               routeId: { type: ["integer", "null"] },
               routeName: { type: ["string", "null"] },
               from: locationSchema,
               to: locationSchema,
+              coordinates: {
+                type: "array",
+                minItems: 2,
+                items: locationSchema,
+              },
               distanceM: { type: "number" },
               timeSeconds: { type: "number" },
               cost: { type: "number" },

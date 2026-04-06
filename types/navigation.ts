@@ -14,11 +14,6 @@ export type RoutingOptions = {
   maxWalkingNeighbors?: number;
   maxBusTransfers?: number;
   walkingSpeedMps?: number;
-  walkLinearCoeff?: number;
-  walkExpCoeff?: number;
-  walkExpScaleM?: number;
-  transferExpCoeff?: number;
-  transferExpRate?: number;
 };
 
 export type NavigationRouteRequestBody = {
@@ -51,6 +46,7 @@ export type RoutingGraphEdge = {
   route_id: number | null;
   travel_time: number;
   distance_km: number;
+  geom: string | null;
 };
 
 export type RoutingGraphRouteNode = {
@@ -113,6 +109,7 @@ export type RouteSegment = {
   routeName: string | null;
   from: LocationDTO;
   to: LocationDTO;
+  coordinates: LocationDTO[];
   distanceM: number;
   timeSeconds: number;
   cost: number;

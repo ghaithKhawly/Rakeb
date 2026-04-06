@@ -206,21 +206,11 @@ async function getEffectiveRoutingConfig(
     walkingSpeedMps: body.options?.walkingSpeedMps
       ?? stored?.walking_speed_mps
       ?? DEFAULT_ROUTING_CONFIG.walkingSpeedMps,
-    walkLinearCoeff: body.options?.walkLinearCoeff
-      ?? stored?.walk_linear_coeff
-      ?? DEFAULT_ROUTING_CONFIG.walkLinearCoeff,
-    walkExpCoeff: body.options?.walkExpCoeff
-      ?? stored?.walk_exp_coeff
-      ?? DEFAULT_ROUTING_CONFIG.walkExpCoeff,
-    walkExpScaleM: body.options?.walkExpScaleM
-      ?? stored?.walk_exp_scale_m
-      ?? DEFAULT_ROUTING_CONFIG.walkExpScaleM,
-    transferExpCoeff: body.options?.transferExpCoeff
-      ?? stored?.transfer_exp_coeff
-      ?? DEFAULT_ROUTING_CONFIG.transferExpCoeff,
-    transferExpRate: body.options?.transferExpRate
-      ?? stored?.transfer_exp_rate
-      ?? DEFAULT_ROUTING_CONFIG.transferExpRate,
+    walkLinearCoeff: stored?.walk_linear_coeff ?? DEFAULT_ROUTING_CONFIG.walkLinearCoeff,
+    walkExpCoeff: stored?.walk_exp_coeff ?? DEFAULT_ROUTING_CONFIG.walkExpCoeff,
+    walkExpScaleM: stored?.walk_exp_scale_m ?? DEFAULT_ROUTING_CONFIG.walkExpScaleM,
+    transferExpCoeff: stored?.transfer_exp_coeff ?? DEFAULT_ROUTING_CONFIG.transferExpCoeff,
+    transferExpRate: stored?.transfer_exp_rate ?? DEFAULT_ROUTING_CONFIG.transferExpRate,
   };
 }
 
@@ -631,6 +621,23 @@ export async function busRoutes(fastify: FastifyInstance) {
         }
       },
     );
+
+    fastify.get(
+      "/navigation/quick-graph",
+      async (_request, reply) => {
+        const snapshot = await graphCache.getSnapshot(fastify);
+        reply.header("x-graph-loaded-at", snapshot.loadedAt);
+
+        return {
+          loadedAt: snapshot.loadedAt,
+          graphVersion: snapshot.graphVersion,
+          routes: snapshot.routes,
+          nodes: snapshot.nodes,
+          edges: snapshot.edges,
+          routeNodes: snapshot.routeNodes,
+        };
+      },
+    );
   }
 
   fastify.get(
@@ -666,11 +673,6 @@ export async function busRoutes(fastify: FastifyInstance) {
             maxWalkingNeighbors: config.maxWalkingNeighbors,
             maxBusTransfers: config.maxBusTransfers,
             walkingSpeedMps: config.walkingSpeedMps,
-            walkLinearCoeff: config.walkLinearCoeff,
-            walkExpCoeff: config.walkExpCoeff,
-            walkExpScaleM: config.walkExpScaleM,
-            transferExpCoeff: config.transferExpCoeff,
-            transferExpRate: config.transferExpRate,
           },
         };
       } finally {
@@ -780,11 +782,11 @@ export async function busRoutes(fastify: FastifyInstance) {
             body.options?.maxWalkingNeighbors ?? current.maxWalkingNeighbors,
             body.options?.maxBusTransfers ?? current.maxBusTransfers,
             body.options?.walkingSpeedMps ?? current.walkingSpeedMps,
-            body.options?.walkLinearCoeff ?? current.walkLinearCoeff,
-            body.options?.walkExpCoeff ?? current.walkExpCoeff,
-            body.options?.walkExpScaleM ?? current.walkExpScaleM,
-            body.options?.transferExpCoeff ?? current.transferExpCoeff,
-            body.options?.transferExpRate ?? current.transferExpRate,
+            current.walkLinearCoeff,
+            current.walkExpCoeff,
+            current.walkExpScaleM,
+            current.transferExpCoeff,
+            current.transferExpRate,
           ],
         );
 
@@ -797,11 +799,6 @@ export async function busRoutes(fastify: FastifyInstance) {
             maxWalkingNeighbors: body.options?.maxWalkingNeighbors ?? current.maxWalkingNeighbors,
             maxBusTransfers: body.options?.maxBusTransfers ?? current.maxBusTransfers,
             walkingSpeedMps: body.options?.walkingSpeedMps ?? current.walkingSpeedMps,
-            walkLinearCoeff: body.options?.walkLinearCoeff ?? current.walkLinearCoeff,
-            walkExpCoeff: body.options?.walkExpCoeff ?? current.walkExpCoeff,
-            walkExpScaleM: body.options?.walkExpScaleM ?? current.walkExpScaleM,
-            transferExpCoeff: body.options?.transferExpCoeff ?? current.transferExpCoeff,
-            transferExpRate: body.options?.transferExpRate ?? current.transferExpRate,
           },
         };
       } finally {
