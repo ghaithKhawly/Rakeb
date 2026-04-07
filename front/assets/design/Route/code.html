@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&amp;family=Public_Sans:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "tertiary": "#833700",
+              "primary-fixed-dim": "#b7c4ff",
+              "on-background": "#1a1c1e",
+              "surface": "#faf9fc",
+              "surface-bright": "#faf9fc",
+              "inverse-primary": "#b7c4ff",
+              "on-secondary": "#ffffff",
+              "secondary": "#5d5e61",
+              "surface-container-highest": "#e3e2e5",
+              "inverse-surface": "#2f3033",
+              "surface-variant": "#e3e2e5",
+              "background": "#faf9fc",
+              "outline-variant": "#c3c5d9",
+              "surface-container-low": "#f4f3f6",
+              "tertiary-container": "#a94900",
+              "surface-container-high": "#e8e8eb",
+              "on-surface-variant": "#434656",
+              "secondary-fixed-dim": "#c6c6c9",
+              "on-tertiary-container": "#ffdece",
+              "on-primary-fixed-variant": "#0038b6",
+              "on-error": "#ffffff",
+              "secondary-fixed": "#e2e2e5",
+              "on-primary-container": "#dfe3ff",
+              "inverse-on-surface": "#f1f0f3",
+              "surface-container": "#eeedf0",
+              "on-primary-fixed": "#001452",
+              "tertiary-fixed-dim": "#ffb690",
+              "surface-container-lowest": "#ffffff",
+              "on-tertiary-fixed-variant": "#783200",
+              "on-secondary-fixed-variant": "#454749",
+              "error": "#ba1a1a",
+              "primary-container": "#0052ff",
+              "surface-tint": "#004ced",
+              "primary-fixed": "#dde1ff",
+              "outline": "#737688",
+              "on-secondary-fixed": "#1a1c1e",
+              "error-container": "#ffdad6",
+              "on-primary": "#ffffff",
+              "on-surface": "#1a1c1e",
+              "on-tertiary": "#ffffff",
+              "tertiary-fixed": "#ffdbca",
+              "on-tertiary-fixed": "#331100",
+              "on-secondary-container": "#636467",
+              "secondary-container": "#e2e2e5",
+              "surface-dim": "#dadadc",
+              "primary": "#003ec7",
+              "on-error-container": "#93000a"
+            },
+            fontFamily: {
+              "headline": ["Inter"],
+              "body": ["Inter"],
+              "label": ["Public Sans"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "1.5rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .tonal-depth-shift {
+            background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.7) 100%);
+        }
+        .map-container {
+            height: 100vh;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+        .journey-line-walking {
+            stroke-dasharray: 8 8;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary/20">
+<!-- Top AppBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0px_0px_32px_rgba(26,28,30,0.06)]">
+<div class="flex justify-between items-center w-full px-8 py-4">
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-blue-700 dark:text-blue-400 p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 transition-colors rounded-full active:scale-95 duration-200">arrow_back</button>
+<h1 class="text-2xl font-black text-blue-700 dark:text-blue-400 italic font-['Inter'] tracking-tight">Kinetic</h1>
+</div>
+<div class="flex items-center gap-2">
+<div class="bg-surface-container-high px-4 py-2 rounded-full flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-primary">directions_bus</span>
+<span class="font-label text-[11px] uppercase tracking-widest text-on-surface">Route G • Active</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Map Canvas (Background) -->
+<main class="map-container overflow-hidden">
+<img class="w-full h-full object-cover grayscale-[20%] opacity-90" data-alt="Minimalist urban map with soft grey and blue tones showing streets and building footprints from an aerial perspective" data-location="San Francisco" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC_49h6l6knEY4x46pEeoeKVLfHjBiC0Ah_jQPMuP-Ukwk1z6moHA7jvIh-GO8rMy8Ztr9ncUmps5vvAceR3tIP6AHX7c9eNROK6pIqE4U6y8XX6wwK_J0djEsbHLH2zXO98DgEkgEj19X3_MpErRFNehPfWWwq5RSmbTu9LQNhLAqIlgvhtXwFxqveRi5fhfG29vjlyb_bjfJ7L8_i_fWlrP8li5k1zSHNXsH-N3L8ykdTvZPZJD6CiX_OTt0jHZdyOQoxQyMD2eeG"/>
+<!-- SVG Overlays for Journey Polyline -->
+<svg class="absolute inset-0 w-full h-full z-10 pointer-events-none" preserveaspectratio="none" viewbox="0 0 1000 1000">
+<!-- Walk segment 1 -->
+<path class="journey-line-walking stroke-tertiary" d="M 500 800 L 450 650" fill="none" stroke-width="6"></path>
+<!-- Bus segment -->
+<path class="stroke-primary" d="M 450 650 L 550 400 L 700 300" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"></path>
+<!-- Walk segment 2 -->
+<path class="journey-line-walking stroke-tertiary" d="M 700 300 L 750 150" fill="none" stroke-width="6"></path>
+<!-- Markers -->
+<circle class="fill-white stroke-on-surface stroke-2" cx="500" cy="800" r="8"></circle>
+<circle class="fill-primary stroke-white stroke-2" cx="450" cy="650" r="10"></circle>
+<circle class="fill-primary stroke-white stroke-2" cx="700" cy="300" r="10"></circle>
+<circle class="fill-tertiary stroke-white stroke-2" cx="750" cy="150" r="12"></circle>
+</svg>
+<!-- Floating UI Elements -->
+<div class="absolute right-6 top-32 z-20 flex flex-col gap-4">
+<button class="w-14 h-14 bg-white shadow-[0px_4px_24px_rgba(0,0,0,0.1)] rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors active:scale-95">
+<span class="material-symbols-outlined">my_location</span>
+</button>
+<button class="w-14 h-14 bg-white shadow-[0px_4px_24px_rgba(0,0,0,0.1)] rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors active:scale-95">
+<span class="material-symbols-outlined">layers</span>
+</button>
+</div>
+</main>
+<!-- Expanded Route Bottom Sheet -->
+<section class="fixed bottom-0 w-full z-40 bg-white dark:bg-slate-900 rounded-t-[2rem] shadow-[0px_-8px_48px_rgba(0,0,0,0.12)] max-h-[618px] flex flex-col">
+<!-- Handle -->
+<div class="w-full flex justify-center py-4">
+<div class="w-10 h-1.5 bg-outline-variant/30 rounded-full"></div>
+</div>
+<div class="px-8 pb-32 overflow-y-auto">
+<!-- Header Info -->
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-headline font-black text-5xl text-on-surface tracking-tighter">24 <span class="text-xl font-bold text-on-surface-variant align-middle">MIN</span></h2>
+<p class="font-label text-[12px] uppercase tracking-[0.1em] text-on-surface-variant mt-2">Arrival at 12:45 PM • 1.4 miles</p>
+</div>
+<div class="flex -space-x-2">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed flex items-center justify-center border-2 border-white">
+<span class="material-symbols-outlined text-[20px] text-tertiary">directions_walk</span>
+</div>
+<div class="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center border-2 border-white">
+<span class="material-symbols-outlined text-[20px] text-primary">directions_bus</span>
+</div>
+</div>
+</div>
+<!-- Steps Feed -->
+<div class="space-y-6">
+<!-- Step 1 -->
+<div class="flex gap-6 group">
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 rounded-2xl bg-tertiary/10 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">directions_walk</span>
+</div>
+<div class="w-1 h-full bg-tertiary/20 rounded-full my-2 min-h-[40px]"></div>
+</div>
+<div class="pt-1 flex-1">
+<h3 class="font-headline font-bold text-xl text-on-surface leading-tight">Walk to Stop A</h3>
+<p class="text-on-surface-variant font-medium mt-1">450ft • 3 min</p>
+<div class="mt-3 p-4 bg-surface-container-low rounded-xl">
+<p class="text-sm text-on-surface-variant">Head North on <span class="font-bold text-on-surface">Market St</span> toward 4th St.</p>
+</div>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="flex gap-6 group">
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">directions_bus</span>
+</div>
+<div class="w-1 h-full bg-primary/20 rounded-full my-2 min-h-[40px]"></div>
+</div>
+<div class="pt-1 flex-1">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline font-bold text-xl text-on-surface leading-tight">Take Bus G</h3>
+<p class="text-on-surface-variant font-medium mt-1">Towards Richmond Dist.</p>
+</div>
+<div class="bg-primary text-white px-3 py-1 rounded-lg font-black text-lg">G</div>
+</div>
+<div class="mt-4 flex items-center gap-4 text-on-surface-variant bg-surface-container p-4 rounded-xl">
+<div class="flex flex-col">
+<span class="text-xs uppercase font-label tracking-tighter">Stops</span>
+<span class="font-bold text-on-surface">8 stops</span>
+</div>
+<div class="w-px h-8 bg-outline-variant/30"></div>
+<div class="flex flex-col">
+<span class="text-xs uppercase font-label tracking-tighter">Wait</span>
+<span class="font-bold text-primary">4 min</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="flex gap-6 group">
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 rounded-2xl bg-tertiary/10 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">directions_walk</span>
+</div>
+</div>
+<div class="pt-1 flex-1">
+<h3 class="font-headline font-bold text-xl text-on-surface leading-tight">Get off at Stop E</h3>
+<p class="text-on-surface-variant font-medium mt-1">Walk to <span class="text-on-surface font-bold">Museum of Art</span></p>
+<p class="text-sm text-on-surface-variant mt-2">2 min walk • 200ft</p>
+</div>
+</div>
+</div>
+<!-- CTA -->
+<div class="mt-10">
+<button class="w-full h-16 bg-gradient-to-br from-primary to-primary-container text-white rounded-xl font-headline font-bold text-lg shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-3">
+<span class="material-symbols-outlined">navigation</span>
+                    Start Live Journey
+                </button>
+</div>
+</div>
+</section>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 w-full z-50 bg-white dark:bg-slate-900 rounded-t-[1.5rem] shadow-[0px_-4px_24px_rgba(0,0,0,0.04)]">
+<div class="flex justify-around items-center w-full px-6 pb-8 pt-2">
+<!-- Explore Tab (Active) -->
+<a class="flex flex-col items-center justify-center bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-[1.5rem] px-6 py-2 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined" data-icon="explore" style="font-variation-settings: 'FILL' 1;">explore</span>
+<span class="font-['Public_Sans'] text-[11px] uppercase tracking-[0.05em] font-bold mt-1">Explore</span>
+</a>
+<!-- Settings Tab -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-6 py-2 hover:text-blue-600 dark:hover:text-blue-200 transition-transform active:scale-90" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-['Public_Sans'] text-[11px] uppercase tracking-[0.05em] font-bold mt-1">Settings</span>
+</a>
+</div>
+</nav>
+</body></html>

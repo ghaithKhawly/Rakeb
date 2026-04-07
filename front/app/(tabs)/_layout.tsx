@@ -27,16 +27,7 @@ export default function TabLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => (
-            <Ionicons size={24} name="grid" color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: "Route Planner",
-          tabBarIcon: ({ color }) => (
-            <Ionicons size={24} name="map" color={color} />
+            <Ionicons size={24} name="home" color={color} />
           ),
         }}
       />
