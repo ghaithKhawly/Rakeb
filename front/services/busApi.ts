@@ -12,9 +12,11 @@ import type {
   GetUserTravelHistoryQuery,
   GraphCacheQuery,
   InvalidateGraphQuery,
+  SetRoutingPreferencesBody,
   SubmitBusFeedbackBody,
 } from "../../types/bus";
 import type {
+  RoutingPreferenceWeights,
   NavigationRouteRequestBody,
   NavigationRouteResult,
   RoutingGraphSnapshot,
@@ -116,6 +118,18 @@ export type GetUserTravelHistoryResponse = {
   items: TravelHistoryItem[];
 };
 
+export type RoutingPreferencesResponse = {
+  message?: string;
+  preferences: RoutingPreferenceWeights;
+  options: {
+    maxWalkingDistanceM: number;
+    maxTotalWalkingDistanceM: number;
+    maxWalkingNeighbors: number;
+    maxBusTransfers: number;
+    walkingSpeedMps: number;
+  };
+};
+
 export async function computeNavigationRoute(
   body: NavigationRouteRequestBody,
 ): Promise<NavigationRouteResult> {
@@ -132,6 +146,23 @@ export async function getUserTravelHistory(
   const { data } = await api.get<GetUserTravelHistoryResponse>(
     "/api/busses/navigation/history",
     { params: query },
+  );
+  return data;
+}
+
+export async function getRoutingPreferences(): Promise<RoutingPreferencesResponse> {
+  const { data } = await api.get<RoutingPreferencesResponse>(
+    "/api/busses/navigation/preferences",
+  );
+  return data;
+}
+
+export async function setRoutingPreferences(
+  body: SetRoutingPreferencesBody,
+): Promise<RoutingPreferencesResponse> {
+  const { data } = await api.post<RoutingPreferencesResponse>(
+    "/api/busses/navigation/preferences",
+    body,
   );
   return data;
 }

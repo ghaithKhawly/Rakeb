@@ -24,6 +24,30 @@ interface AuthContextType {
   signOut: () => Promise<void>;
 }
 
+function maskToken(token: string): string {
+  if (token.length <= 16) {
+    return "***";
+  }
+  return `${token.slice(0, 8)}...${token.slice(-8)}`;
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padLength = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + "=".repeat(padLength);
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 // Create Context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -47,6 +71,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Set default header for future requests
           api.defaults.headers.common["Authorization"] =
             `Bearer ${storedToken}`;
+
+          if (__DEV__) {
+            console.log("[Auth] restored token", {
+              tokenMasked: maskToken(storedToken),
+              claims: decodeJwtPayload(storedToken),
+            });
+          }
         }
       } catch (error) {
         console.error("Failed to load auth data", error);
@@ -69,6 +100,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Configure axios
       api.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
+
+      if (__DEV__) {
+        console.log("[Auth] sign-in token", {
+          tokenMasked: maskToken(newToken),
+          claims: decodeJwtPayload(newToken),
+        });
+      }
 
       router.replace("/(tabs)");
     } catch (error) {
