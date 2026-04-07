@@ -15,7 +15,7 @@ export const app = Fastify({
 export async function buildApp() {
   app.setErrorHandler(
     (error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
-      console.log("errs", error);
+      request.log.error({ err: error }, "Unhandled request error");
       if (error.validation) {
         const validationContext =
           (error as FastifyError & { validationContext?: string })
@@ -32,14 +32,23 @@ export async function buildApp() {
         });
 
         const firstError = validationErrors[0];
-        console.log("valerrs", firstError);
         return reply.status(400).send({
           error: `Validation Error at ${firstError.field}: ${firstError.message}`,
           details: validationErrors,
         });
       }
 
-      reply.send(error);
+      const statusCode = error.statusCode && error.statusCode >= 400
+        ? error.statusCode
+        : 500;
+
+      const exposeErrorDetails = process.env.EXPOSE_ERROR_DETAILS === "1";
+
+      return reply.status(statusCode).send({
+        error: statusCode >= 500 ? "Internal Server Error" : (error.name ?? "Request Error"),
+        message: error.message || "Unexpected server error",
+        ...(exposeErrorDetails && error.stack ? { details: error.stack } : {}),
+      });
     },
   );
   await app.register(cors, {

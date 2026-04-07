@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { isAxiosError } from "axios";
 import {
   ActivityIndicator,
   Alert,
@@ -14,12 +15,14 @@ import { Ionicons } from "@expo/vector-icons";
 
 import type { LocationDTO } from "../../../types/location";
 import type {
+  NavigationRouteRequestBody,
   NavigationRouteResult,
   RouteSegment,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { useRoutingPreferences } from "@/hooks/useBusApi";
 
 const INITIAL_REGION: Region = {
   latitude: 33.5138,
@@ -75,8 +78,79 @@ function pointId(lat: number, lng: number): string {
   return `${lat.toFixed(6)}:${lng.toFixed(6)}`;
 }
 
+function extractApiErrorMessage(error: unknown): string {
+  if (isAxiosError(error)) {
+    const data = error.response?.data as
+      | {
+          error?: string;
+          message?: string;
+          details?:
+            | string
+            | { message?: string }
+            | Array<{ field?: string; message?: string }>;
+        }
+      | string
+      | undefined;
+
+    if (typeof data === "string" && data.trim().length > 0) {
+      return data;
+    }
+
+    if (data && typeof data === "object") {
+      if (typeof data.details === "string" && data.details.trim().length > 0) {
+        return data.details;
+      }
+
+      if (
+        data.details &&
+        typeof data.details === "object" &&
+        !Array.isArray(data.details) &&
+        typeof data.details.message === "string" &&
+        data.details.message.trim().length > 0
+      ) {
+        return data.details.message;
+      }
+
+      const details = Array.isArray(data.details)
+        ? data.details
+            .map((item) => {
+              if (!item) {
+                return "";
+              }
+              const field = item.field ? `${item.field}: ` : "";
+              return `${field}${item.message ?? "Invalid value"}`;
+            })
+            .filter(Boolean)
+        : [];
+
+      if (details.length > 0) {
+        return details.join("\n");
+      }
+
+      if (typeof data.error === "string" && data.error.trim().length > 0) {
+        return data.error;
+      }
+
+      if (typeof data.message === "string" && data.message.trim().length > 0) {
+        return data.message;
+      }
+    }
+
+    if (error.message) {
+      return error.message;
+    }
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return "Failed to compute route.";
+}
+
 export default function HomeScreen() {
   const mapRef = useRef<MapView>(null);
+  const routingPreferencesQuery = useRoutingPreferences();
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
     null,
@@ -201,15 +275,37 @@ export default function HomeScreen() {
     setError(null);
 
     try {
+      const savedPrefs = routingPreferencesQuery.data;
+
+      const payload: NavigationRouteRequestBody = {
+        from: currentLocation,
+        to: destination,
+        ...(savedPrefs
+          ? {
+              preferences: savedPrefs.preferences,
+              options: savedPrefs.options,
+            }
+          : {}),
+      };
+
+      if (__DEV__) {
+        console.log("[Route] request payload", payload);
+      }
+
       const response = await api.post<NavigationRouteResult>(
         "/api/busses/navigation/route",
-        {
-          from: currentLocation,
-          to: destination,
-        },
+        payload,
       );
 
       setRouteResult(response.data);
+
+      if (__DEV__) {
+        console.log("[Route] response summary", {
+          walkingDistanceM: response.data.walkingDistanceM,
+          transferCount: response.data.transferCount,
+          usedConfig: response.data.usedConfig,
+        });
+      }
 
       const coords = response.data.segments.flatMap((segment) => [
         { latitude: segment.from.lat, longitude: segment.from.lng },
@@ -223,10 +319,10 @@ export default function HomeScreen() {
         });
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to compute route.";
+      const message = extractApiErrorMessage(err);
       setError(message);
       setRouteResult(null);
+      Alert.alert("Route request failed", message);
     } finally {
       setIsRouting(false);
     }
@@ -315,6 +411,14 @@ export default function HomeScreen() {
         <View style={styles.sheet}>
           <ThemedText type="defaultSemiBold" style={styles.title}>
             Route Planner
+          </ThemedText>
+
+          <ThemedText style={styles.prefStatusText}>
+            {routingPreferencesQuery.isLoading
+              ? "Loading saved preferences..."
+              : routingPreferencesQuery.data
+                ? "Using saved preferences"
+                : "Using server defaults"}
           </ThemedText>
 
           <ThemedText style={styles.metaText}>
@@ -508,6 +612,11 @@ const styles = StyleSheet.create({
   metaText: {
     color: Colors.dark.icon,
     fontSize: 12,
+  },
+  prefStatusText: {
+    color: Colors.dark.primary,
+    fontSize: 11,
+    fontWeight: "600",
   },
   modeRow: {
     flexDirection: "row",

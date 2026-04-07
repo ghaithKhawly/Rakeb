@@ -35,6 +35,7 @@ import type {
   EffectiveRoutingConfig,
   NavigationRouteResult,
   NavigationRouteRequestBody,
+  RouteSegment,
   RouteLiveMetricForRouting,
   RoutingWorkerPayload,
   RoutingPreferenceWeights,
@@ -125,6 +126,49 @@ function clampNumber(value: number, min: number, max: number): number {
 function deriveDynamicMaxWalkingDistanceM(maxTotalWalkingDistanceM: number): number {
   // Keep single-walk cap proportional to total budget while keeping a practical floor.
   return Math.max(300, maxTotalWalkingDistanceM * 0.35);
+}
+
+function normalizeRouteSegment(
+  segment: Partial<RouteSegment>,
+  fallbackFrom: { lat: number; lng: number; label?: string },
+  fallbackTo: { lat: number; lng: number; label?: string },
+): RouteSegment {
+  const from = segment.from ?? fallbackFrom;
+  const to = segment.to ?? fallbackTo;
+
+  const coordinates = Array.isArray(segment.coordinates) && segment.coordinates.length >= 2
+    ? segment.coordinates
+    : [from, to];
+
+  return {
+    mode: segment.mode === "bus" ? "bus" : "walk",
+    routeId: typeof segment.routeId === "number" ? segment.routeId : null,
+    routeName: typeof segment.routeName === "string" ? segment.routeName : null,
+    from,
+    to,
+    coordinates,
+    distanceM: Number(segment.distanceM ?? 0),
+    timeSeconds: Number(segment.timeSeconds ?? 0),
+    cost: Number(segment.cost ?? 0),
+  };
+}
+
+function normalizeRouteResultForSchema(
+  result: NavigationRouteResult,
+  requestFrom: { lat: number; lng: number; label?: string },
+  requestTo: { lat: number; lng: number; label?: string },
+): NavigationRouteResult {
+  const baseFrom = result.from ?? requestFrom;
+  const baseTo = result.to ?? requestTo;
+
+  return {
+    ...result,
+    from: baseFrom,
+    to: baseTo,
+    segments: (Array.isArray(result.segments) ? result.segments : []).map((segment) =>
+      normalizeRouteSegment(segment, baseFrom, baseTo),
+    ),
+  };
 }
 
 async function getEffectiveRoutingConfig(
@@ -306,6 +350,7 @@ export async function busRoutes(fastify: FastifyInstance) {
   const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 2500);
   const enableQuickTestRoutes =
     process.env.ENABLE_DEV_QUICK_TEST_ROUTES === "1" || process.env.NODE_ENV !== "production";
+  const debugRoutingLogs = process.env.DEBUG_ROUTING_LOGS === "1" || process.env.NODE_ENV !== "production";
 
   async function routeWithFallback(payload: {
     base: Omit<RoutingWorkerPayload, "walkingMode">;
@@ -386,6 +431,19 @@ export async function busRoutes(fastify: FastifyInstance) {
 
       const client = await fastify.pg.connect();
       try {
+        if (debugRoutingLogs) {
+          fastify.log.info(
+            {
+              userId,
+              from: body.from,
+              to: body.to,
+              requestPreferences: body.preferences ?? null,
+              requestOptions: body.options ?? null,
+            },
+            "Route request received",
+          );
+        }
+
         const metricsRes = await client.query<{
           route_id: number;
           effective_price: number | null;
@@ -419,6 +477,22 @@ export async function busRoutes(fastify: FastifyInstance) {
         }));
 
         const config = await getEffectiveRoutingConfig(client, userId, body);
+        if (debugRoutingLogs) {
+          fastify.log.info(
+            {
+              userId,
+              effectiveConfig: {
+                maxWalkingDistanceM: config.maxWalkingDistanceM,
+                maxTotalWalkingDistanceM: config.maxTotalWalkingDistanceM,
+                maxWalkingNeighbors: config.maxWalkingNeighbors,
+                maxBusTransfers: config.maxBusTransfers,
+                walkingSpeedMps: config.walkingSpeedMps,
+                weights: config.weights,
+              },
+            },
+            "Effective routing config resolved",
+          );
+        }
         const configJson = JSON.stringify(config);
 
         const cachedRes = await client.query<{
@@ -453,12 +527,12 @@ export async function busRoutes(fastify: FastifyInstance) {
           && cached.graph_version === snapshot.graphVersion
           && JSON.stringify(cachedResult.usedConfig) === configJson
         ) {
-          return cachedResult;
+          return normalizeRouteResultForSchema(cachedResult, body.from, body.to);
         }
 
         let routeResult: NavigationRouteResult;
         try {
-          routeResult = await routeWithFallback({
+          const computedResult = await routeWithFallback({
             base: {
               from: body.from,
               to: body.to,
@@ -467,6 +541,26 @@ export async function busRoutes(fastify: FastifyInstance) {
               config,
             },
           });
+          routeResult = normalizeRouteResultForSchema(computedResult, body.from, body.to);
+          if (debugRoutingLogs) {
+            const maxSegmentWalkM = routeResult.segments
+              .filter((segment) => segment.mode === "walk")
+              .reduce((max, segment) => Math.max(max, segment.distanceM), 0);
+
+            fastify.log.info(
+              {
+                userId,
+                walkingDistanceM: routeResult.walkingDistanceM,
+                maxSegmentWalkM,
+                transferCount: routeResult.transferCount,
+                usedConfig: {
+                  maxWalkingDistanceM: routeResult.usedConfig.maxWalkingDistanceM,
+                  maxTotalWalkingDistanceM: routeResult.usedConfig.maxTotalWalkingDistanceM,
+                },
+              },
+              "Route result computed",
+            );
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const isTimeout = /timed out/i.test(message);
@@ -595,7 +689,7 @@ export async function busRoutes(fastify: FastifyInstance) {
           const config = await getEffectiveRoutingConfig(client, 0, body);
 
           try {
-            const routeResult = await routeWithFallback({
+            const computedResult = await routeWithFallback({
               base: {
                 from: body.from,
                 to: body.to,
@@ -605,7 +699,7 @@ export async function busRoutes(fastify: FastifyInstance) {
               },
             });
 
-            return routeResult;
+            return normalizeRouteResultForSchema(computedResult, body.from, body.to);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             const isTimeout = /timed out/i.test(message);
@@ -665,6 +759,23 @@ export async function busRoutes(fastify: FastifyInstance) {
           },
         );
 
+        if (debugRoutingLogs) {
+          fastify.log.info(
+            {
+              userId,
+              preferences: config.weights,
+              options: {
+                maxWalkingDistanceM: config.maxWalkingDistanceM,
+                maxTotalWalkingDistanceM: config.maxTotalWalkingDistanceM,
+                maxWalkingNeighbors: config.maxWalkingNeighbors,
+                maxBusTransfers: config.maxBusTransfers,
+                walkingSpeedMps: config.walkingSpeedMps,
+              },
+            },
+            "Routing preferences fetched",
+          );
+        }
+
         return {
           preferences: config.weights,
           options: {
@@ -681,13 +792,10 @@ export async function busRoutes(fastify: FastifyInstance) {
     },
   );
 
-  fastify.put(
-    "/navigation/preferences",
-    {
-      preHandler: [fastify.authenticate],
-      schema: setRoutingPreferencesSchema,
-    },
-    async (request, reply) => {
+  const saveRoutingPreferences = async (
+    request: Parameters<FastifyInstance["put"]>[2] extends (...args: infer P) => unknown ? P[0] : never,
+    reply: Parameters<FastifyInstance["put"]>[2] extends (...args: infer P) => unknown ? P[1] : never,
+  ) => {
       const userPayload = request.user as { id?: number | string };
       const userId = Number(userPayload?.id);
 
@@ -698,6 +806,17 @@ export async function busRoutes(fastify: FastifyInstance) {
       const body = request.body as SetRoutingPreferencesBody;
       const client = await fastify.pg.connect();
       try {
+        if (debugRoutingLogs) {
+          fastify.log.info(
+            {
+              userId,
+              incomingPreferences: body.preferences ?? null,
+              incomingOptions: body.options ?? null,
+            },
+            "Routing preferences save request",
+          );
+        }
+
         const current = await getEffectiveRoutingConfig(
           client,
           userId,
@@ -790,6 +909,23 @@ export async function busRoutes(fastify: FastifyInstance) {
           ],
         );
 
+        if (debugRoutingLogs) {
+          fastify.log.info(
+            {
+              userId,
+              savedPreferences: nextWeights,
+              savedOptions: {
+                maxWalkingDistanceM: nextMaxWalkingDistanceM,
+                maxTotalWalkingDistanceM: nextMaxTotalWalkingDistanceM,
+                maxWalkingNeighbors: body.options?.maxWalkingNeighbors ?? current.maxWalkingNeighbors,
+                maxBusTransfers: body.options?.maxBusTransfers ?? current.maxBusTransfers,
+                walkingSpeedMps: body.options?.walkingSpeedMps ?? current.walkingSpeedMps,
+              },
+            },
+            "Routing preferences saved",
+          );
+        }
+
         return {
           message: "Routing preferences saved",
           preferences: nextWeights,
@@ -804,7 +940,24 @@ export async function busRoutes(fastify: FastifyInstance) {
       } finally {
         client.release();
       }
+    };
+
+  fastify.post(
+    "/navigation/preferences",
+    {
+      preHandler: [fastify.authenticate],
+      schema: setRoutingPreferencesSchema,
     },
+    saveRoutingPreferences,
+  );
+
+  fastify.put(
+    "/navigation/preferences",
+    {
+      preHandler: [fastify.authenticate],
+      schema: setRoutingPreferencesSchema,
+    },
+    saveRoutingPreferences,
   );
 
   fastify.get(

@@ -15,10 +15,12 @@ import {
   getBusses,
   getGraphCacheStatus,
   getGraphSnapshot,
+  getRoutingPreferences,
   getRouteLiveMetrics,
   getUserTravelHistory,
   increaseBusPricesByTenPercent,
   invalidateGraphCache,
+  setRoutingPreferences,
   submitBusFeedback,
 } from "@/services/busApi";
 
@@ -32,6 +34,7 @@ import type {
   GetUserTravelHistoryQuery,
   GraphCacheQuery,
   InvalidateGraphQuery,
+  SetRoutingPreferencesBody,
   SubmitBusFeedbackBody,
 } from "@types/bus";
 import type { NavigationRouteRequestBody } from "@types/navigation";
@@ -44,6 +47,7 @@ export const busApiKeys = {
   graphSnapshot: (query: GetGraphQuery) => [...busApiKeys.all, "graphSnapshot", query] as const,
   busses: (query: GetBusesQuery) => [...busApiKeys.all, "busses", query] as const,
   busById: (id: number) => [...busApiKeys.all, "busById", id] as const,
+  routingPreferences: () => [...busApiKeys.all, "routingPreferences"] as const,
   routeLiveMetrics: (query: GetRouteLiveMetricsQuery) => [...busApiKeys.all, "routeLiveMetrics", query] as const,
   busFeedbackSummary: (routeId: number, days: number) => [...busApiKeys.all, "busFeedbackSummary", routeId, days] as const,
 };
@@ -184,6 +188,23 @@ export function useIncreaseBusPricesMutation() {
     mutationFn: () => increaseBusPricesByTenPercent(),
     onSuccess: async () => {
       await invalidate(queryClient, [...busApiKeys.all, "busses"]);
+    },
+  });
+}
+
+export function useRoutingPreferences() {
+  return useQuery({
+    queryKey: busApiKeys.routingPreferences(),
+    queryFn: () => getRoutingPreferences(),
+  });
+}
+
+export function useSetRoutingPreferencesMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetRoutingPreferencesBody) => setRoutingPreferences(body),
+    onSuccess: async () => {
+      await invalidate(queryClient, busApiKeys.routingPreferences());
     },
   });
 }
