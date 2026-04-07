@@ -91,10 +91,5 @@ export type SetRoutingPreferencesBody = {
     maxWalkingNeighbors?: number;
     maxBusTransfers?: number;
     walkingSpeedMps?: number;
-    walkLinearCoeff?: number;
-    walkExpCoeff?: number;
-    walkExpScaleM?: number;
-    transferExpCoeff?: number;
-    transferExpRate?: number;
   };
 };
