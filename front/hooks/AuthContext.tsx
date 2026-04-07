@@ -74,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (__DEV__) {
             console.log("[Auth] restored token", {
+              token: storedToken,
               tokenMasked: maskToken(storedToken),
               claims: decodeJwtPayload(storedToken),
             });
@@ -103,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (__DEV__) {
         console.log("[Auth] sign-in token", {
+          token: newToken,
           tokenMasked: maskToken(newToken),
           claims: decodeJwtPayload(newToken),
         });
