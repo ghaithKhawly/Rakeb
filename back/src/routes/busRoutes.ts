@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { navigationRouteSchema } from "../schemas/navigation";
 import {
   deleteUserTravelHistorySchema,
@@ -50,6 +50,9 @@ import {
   WALK_EXP_SCALE_M,
   WALK_LINEAR_COEFF,
 } from "../constants/routingConstants";
+import {
+  naturalNavigationRoutes,
+} from "../features/natural-navigation/routes/naturalNavigationRoutes";
 
 const DEFAULT_ROUTING_WEIGHTS: RoutingPreferenceWeights = {
   speed: 1,
@@ -347,6 +350,8 @@ async function refreshRouteLiveMetrics(
 }
 
 export async function busRoutes(fastify: FastifyInstance) {
+  await naturalNavigationRoutes(fastify);
+
   const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 2500);
   const enableQuickTestRoutes =
     process.env.ENABLE_DEV_QUICK_TEST_ROUTES === "1" || process.env.NODE_ENV !== "production";
@@ -420,7 +425,6 @@ export async function busRoutes(fastify: FastifyInstance) {
       schema: navigationRouteSchema,
     },
     async (request, reply) => {
-      const snapshot = await graphCache.getSnapshot(fastify);
       const body = request.body as NavigationRouteRequestBody;
       const userPayload = request.user as { id?: number | string };
       const userId = Number(userPayload?.id);
@@ -428,6 +432,8 @@ export async function busRoutes(fastify: FastifyInstance) {
       if (!Number.isFinite(userId)) {
         return reply.code(401).send({ error: "Unauthorized user payload" });
       }
+
+      const snapshot = await graphCache.getSnapshot(fastify);
 
       const client = await fastify.pg.connect();
       try {
@@ -793,8 +799,8 @@ export async function busRoutes(fastify: FastifyInstance) {
   );
 
   const saveRoutingPreferences = async (
-    request: Parameters<FastifyInstance["put"]>[2] extends (...args: infer P) => unknown ? P[0] : never,
-    reply: Parameters<FastifyInstance["put"]>[2] extends (...args: infer P) => unknown ? P[1] : never,
+    request: FastifyRequest,
+    reply: FastifyReply,
   ) => {
       const userPayload = request.user as { id?: number | string };
       const userId = Number(userPayload?.id);
