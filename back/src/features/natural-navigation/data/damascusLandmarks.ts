@@ -1,3 +1,5 @@
+import { curatedOsmLandmarks } from "./damascusLandmarks.osm";
+
 export type LandmarkEntry = {
   id: string;
   nameAr: string;
@@ -50,7 +52,8 @@ export const damascusLandmarks: LandmarkEntry[] = [
   { id: "ashrafieh_sahnaya", nameAr: "أشرفية صحنايا", nameEn: "Ashrafiyat Sahnaya", aliases: ["اشرفية صحنايا", "أشرفية صحنايا", "ashrafiyat sahnaya"], lat: 33.4054, lng: 36.2166 },
   { id: "muhajreen", nameAr: "المهاجرين", nameEn: "Muhajreen", aliases: ["المهاجرين", "muhajreen"], lat: 33.5307, lng: 36.286 },
   { id: "victoria_bridge", nameAr: "جسر فكتوريا", nameEn: "Victoria Bridge", aliases: ["جسر فكتوريا", "victoria bridge"], lat: 33.509, lng: 36.3014 },
-  { id: "hospital_generic", nameAr: "مستشفى", nameEn: "Hospital", aliases: ["مستشفى", "hospital"], lat: 33.516, lng: 36.286 }
+  { id: "hospital_generic", nameAr: "مستشفى", nameEn: "Hospital", aliases: ["مستشفى", "hospital"], lat: 33.516, lng: 36.286 },
+  ...curatedOsmLandmarks,
 ];
 
 const byId = new Map(damascusLandmarks.map((item) => [item.id, item]));
