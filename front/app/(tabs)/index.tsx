@@ -13,6 +13,7 @@ import {
 import MapView, { Marker, Polyline, Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { LocationDTO } from "../../../types/location";
 import type {
@@ -23,6 +24,7 @@ import type {
 import { api } from "@/config/api";
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { MapSearchControl } from "@/components/MapSearchControl";
 import {
   useBusFeedbackSummary,
   useRoutingPreferences,
@@ -103,7 +105,7 @@ function extractApiErrorMessage(error: unknown): string {
           details?:
             | string
             | { message?: string }
-            | Array<{ field?: string; message?: string }>;
+            | { field?: string; message?: string }[];
         }
       | string
       | undefined;
@@ -165,6 +167,9 @@ function extractApiErrorMessage(error: unknown): string {
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+  const topOverlayInset = Math.max(insets.top, 10) + 8;
+  const topMapControlInset = Math.max(topOverlayInset - 9, 0);
   const mapRef = useRef<MapView>(null);
   const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
@@ -181,6 +186,7 @@ export default function HomeScreen() {
     "start" | "destination"
   >("destination");
   const [isRouting, setIsRouting] = useState(false);
+  const [isSearchingPlace, setIsSearchingPlace] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
@@ -292,7 +298,7 @@ export default function HomeScreen() {
 
   const feedbackRoutes = useMemo(() => {
     if (!routeResult) {
-      return [] as Array<{ routeId: number; routeName: string }>;
+      return [] as { routeId: number; routeName: string }[];
     }
 
     const seen = new Set<number>();
@@ -447,6 +453,47 @@ export default function HomeScreen() {
     setFeedbackComment("");
   };
 
+  const searchPlace = async (query: string) => {
+    const searchText = query.trim();
+    if (!searchText) {
+      return;
+    }
+
+    setIsSearchingPlace(true);
+    try {
+      const matches = await Location.geocodeAsync(query);
+      if (matches.length === 0) {
+        Alert.alert("No place found", "Try a more specific place name.");
+        return;
+      }
+
+      const first = matches[0];
+      const point: LocationDTO = {
+        lat: first.latitude,
+        lng: first.longitude,
+        label: searchText,
+      };
+
+      setDestination(point);
+      setRouteResult(null);
+      setMapSelectionMode("destination");
+
+      mapRef.current?.animateToRegion(
+        {
+          latitude: point.lat,
+          longitude: point.lng,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        },
+        350,
+      );
+    } catch {
+      Alert.alert("Search failed", "Could not search places right now.");
+    } finally {
+      setIsSearchingPlace(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -455,6 +502,7 @@ export default function HomeScreen() {
           style={StyleSheet.absoluteFillObject}
           initialRegion={INITIAL_REGION}
           showsUserLocation
+          mapPadding={{ top: topMapControlInset, right: 0, bottom: 0, left: 0 }}
           onPress={(event) => {
             if (routeResult) {
               return;
@@ -521,6 +569,12 @@ export default function HomeScreen() {
             />
           ))}
         </MapView>
+
+        <MapSearchControl
+          topInset={topOverlayInset}
+          isSearching={isSearchingPlace}
+          onSearch={searchPlace}
+        />
 
         <View style={[styles.sheet, isSheetCollapsed && styles.sheetCollapsed]}>
           <ScrollView
