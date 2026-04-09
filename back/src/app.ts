@@ -17,6 +17,19 @@ export async function buildApp() {
     (error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
       request.log.error({ err: error }, "Unhandled request error");
       if (error.validation) {
+        const hasOneOfBodyError = error.validation.some(
+          (err) => err.keyword === "oneOf" && (err.instancePath === "" || err.instancePath === "/body"),
+        );
+
+        if (hasOneOfBodyError && request.url.includes("/api/busses/navigation/route")) {
+          return reply.status(400).send({
+            error: "Invalid navigation payload. Send exactly one mode: (1) map mode with from+to, or (2) text mode with text only. If you sent both text and map points, keep one mode and clear the other.",
+            details: [
+              { field: "body", message: "Expected either { from, to, ... } or { text, ... }" },
+            ],
+          });
+        }
+
         const validationContext =
           (error as FastifyError & { validationContext?: string })
             .validationContext ?? "body";
