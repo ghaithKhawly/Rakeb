@@ -34,6 +34,7 @@ AVG_BUS_SPEED_KMH = 25.0
 TRANSFER_DIST_THRESHOLD = 200.0      # meters
 NODE_MERGE_TOLERANCE = 10.0          # meters
 ROUTE_ASSOCIATION_DIST = 150.0       # meters (for snapping nodes to routes)
+DEFAULT_ACCESS_GAP_M = 400.0         # meters
 
 # ----------------------------------------------------------------------
 # Helper: parse KML coordinates
@@ -60,6 +61,10 @@ def haversine(lon1, lat1, lon2, lat2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+
+def route_length_m(route_geom):
+    return route_geom.length * 111000.0
+
 # ----------------------------------------------------------------------
 # Main script
 # ----------------------------------------------------------------------
@@ -72,6 +77,10 @@ def main():
     parser.add_argument('--host', default='localhost', help='Database host')
     parser.add_argument('--port', default=5432, type=int, help='Database port')
     args = parser.parse_args()
+
+    access_gap_m = float(os.getenv("GRAPH_ROUTE_ACCESS_GAP_M", str(DEFAULT_ACCESS_GAP_M)))
+    if access_gap_m < 0:
+        access_gap_m = 0.0
 
     # ------------------------------------------------------------------
     # 1. Connect to PostgreSQL
@@ -213,6 +222,57 @@ def main():
                 add_candidate(mid_lon, mid_lat, {id_i, id_j})
 
     print(f"Generated {len(candidate_nodes)} raw candidate nodes.")
+
+    # 4c. Route densification: add access nodes along long gaps on each route.
+    # This improves first-leg boarding when a line passes nearby but lacks graph nodes.
+    if access_gap_m > 0:
+        existing_route_fractions = defaultdict(list)
+        for lon, lat, route_set in candidate_nodes:
+            node_point = Point(lon, lat)
+            for route_id in route_set:
+                route_geom = None
+                for r in routes:
+                    if r['id'] == route_id:
+                        route_geom = r['geom_simplified']
+                        break
+                if route_geom is None or route_geom.length <= 0:
+                    continue
+                frac = route_geom.project(node_point, normalized=True)
+                existing_route_fractions[route_id].append(frac)
+
+        densified_count = 0
+        for r in routes:
+            route_id = r['id']
+            route_geom = r['geom_simplified']
+            if route_geom.length <= 0:
+                continue
+
+            length_m = route_length_m(route_geom)
+            if length_m <= access_gap_m:
+                continue
+
+            fracs = existing_route_fractions.get(route_id, [])
+            fracs = [0.0, 1.0] + fracs
+            fracs = sorted(set(max(0.0, min(1.0, f)) for f in fracs))
+
+            for i in range(len(fracs) - 1):
+                f1 = fracs[i]
+                f2 = fracs[i + 1]
+                if f2 <= f1:
+                    continue
+
+                gap_m = (f2 - f1) * length_m
+                if gap_m <= access_gap_m:
+                    continue
+
+                segments = int(math.ceil(gap_m / access_gap_m))
+                for k in range(1, segments):
+                    frac = f1 + (f2 - f1) * (k / segments)
+                    pt = route_geom.interpolate(frac, normalized=True)
+                    add_candidate(pt.x, pt.y, {route_id})
+                    densified_count += 1
+
+        print(f"Added {densified_count} densification candidates (max gap {access_gap_m:.0f}m).")
 
     # ------------------------------------------------------------------
     # 5. Cluster candidate nodes within NODE_MERGE_TOLERANCE

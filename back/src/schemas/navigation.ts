@@ -10,11 +10,13 @@ export const locationSchema = {
 
 export const navigationRouteSchema = {
   tags: ["Navigation"],
-  summary: "Compute best route",
+  summary: "Compute best route from coordinates",
   operationId: "computeNavigationRoute",
+  security: [{ bearerAuth: [] }],
   body: {
     type: "object",
     required: ["from", "to"],
+    additionalProperties: false,
     properties: {
       from: locationSchema,
       to: locationSchema,
@@ -45,96 +47,13 @@ export const navigationRouteSchema = {
   response: {
     200: {
       type: "object",
-      required: [
-        "message",
-        "executedInWorker",
-        "graphLoadedAt",
-        "graphVersion",
-        "from",
-        "to",
-        "totalCost",
-        "components",
-        "transferCount",
-        "walkingDistanceM",
-        "etaSeconds",
-        "segments",
-        "bestEffort",
-        "usedConfig",
-      ],
+      additionalProperties: true,
+    },
+    400: {
+      type: "object",
+      required: ["error"],
       properties: {
-        message: { type: "string" },
-        executedInWorker: { type: "boolean" },
-        graphLoadedAt: { type: ["string", "null"] },
-        graphVersion: { type: ["string", "null"] },
-        from: locationSchema,
-        to: locationSchema,
-        totalCost: { type: "number" },
-        components: {
-          type: "object",
-          required: ["speed", "crowding", "price", "transfer", "walking"],
-          properties: {
-            speed: { type: "number" },
-            crowding: { type: "number" },
-            price: { type: "number" },
-            transfer: { type: "number" },
-            walking: { type: "number" },
-          },
-        },
-        transferCount: { type: "integer" },
-        walkingDistanceM: { type: "number" },
-        etaSeconds: { type: "number" },
-        bestEffort: { type: "boolean" },
-        segments: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["mode", "routeId", "routeName", "from", "to", "coordinates", "distanceM", "timeSeconds", "cost"],
-            properties: {
-              mode: { type: "string", enum: ["walk", "bus"] },
-              routeId: { type: ["integer", "null"] },
-              routeName: { type: ["string", "null"] },
-              from: locationSchema,
-              to: locationSchema,
-              coordinates: {
-                type: "array",
-                minItems: 2,
-                items: locationSchema,
-              },
-              distanceM: { type: "number" },
-              timeSeconds: { type: "number" },
-              cost: { type: "number" },
-            },
-          },
-        },
-        usedConfig: {
-          type: "object",
-          required: [
-            "weights",
-            "maxWalkingDistanceM",
-            "maxTotalWalkingDistanceM",
-            "maxWalkingNeighbors",
-            "maxBusTransfers",
-            "walkingSpeedMps",
-          ],
-          properties: {
-            weights: {
-              type: "object",
-              required: ["speed", "crowding", "price", "transfer", "walking"],
-              properties: {
-                speed: { type: "number" },
-                crowding: { type: "number" },
-                price: { type: "number" },
-                transfer: { type: "number" },
-                walking: { type: "number" },
-              },
-            },
-            maxWalkingDistanceM: { type: "number" },
-            maxTotalWalkingDistanceM: { type: "number" },
-            maxWalkingNeighbors: { type: "integer" },
-            maxBusTransfers: { type: "integer" },
-            walkingSpeedMps: { type: "number" },
-          },
-        },
+        error: { type: "string" },
       },
     },
     401: {

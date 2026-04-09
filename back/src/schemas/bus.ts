@@ -114,6 +114,7 @@ export const graphCacheQuerySchema = {
   tags: ["Graph"],
   summary: "Get graph cache status",
   operationId: "getGraphCacheStatus",
+  security: [{ bearerAuth: [] }],
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -127,6 +128,7 @@ export const getGraphSchema = {
   tags: ["Graph"],
   summary: "Get graph snapshot",
   operationId: "getGraphSnapshot",
+  security: [{ bearerAuth: [] }],
   querystring: {
     type: "object",
     additionalProperties: false,
@@ -144,6 +146,7 @@ export const invalidateGraphSchema = {
   tags: ["Graph"],
   summary: "Invalidate graph cache and optionally rebuild",
   operationId: "invalidateGraphCache",
+  security: [{ bearerAuth: [] }],
   querystring: {
     type: "object",
     additionalProperties: false,
