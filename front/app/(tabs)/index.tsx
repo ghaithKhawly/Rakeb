@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import {
-  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -9,19 +8,19 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
   View,
 } from "react-native";
 import MapView, { Marker, Polyline } from "@/components/maps/MapViewCompat";
 import type { Region } from "@/components/maps/MapViewCompat";
 import * as Location from "expo-location";
-import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { LocationDTO } from "../../../types/location";
 import type {
   NavigationRouteRequestBody,
   NavigationRouteResult,
   ParseNavigationTextResponse,
+  RouteSegment,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
 import { Colors } from "@/constants/theme";
@@ -57,34 +56,6 @@ function pointName(index: number): string {
   return `Point ${String.fromCharCode(base + (index % 26))}`;
 }
 
-function stepTitle(segment: RouteSegment): string {
-  if (segment.mode === "walk") {
-    return "Walk";
-  }
-  return `Take Bus ${segment.routeName ?? "Route"}`;
-}
-
-function stepDetails(segment: RouteSegment, index: number): string {
-  const mins = Math.max(1, Math.round(segment.timeSeconds / 60));
-  const meters = Math.round(segment.distanceM);
-
-  const busNodes = (
-    (
-      segment as RouteSegment & {
-        nodes?: { label?: string; lat?: number; lng?: number }[];
-      }
-    ).nodes ?? []
-  )
-    .map((node, nodeIndex) => node.label ?? pointName(index + nodeIndex + 1))
-    .filter(Boolean);
-
-  if (segment.mode === "bus" && busNodes.length > 0) {
-    return `via ${busNodes.join(", ")} | ${mins} min | ${meters}m`;
-  }
-
-  return `${mins} min | ${meters}m`;
-}
-
 function pointId(lat: number, lng: number): string {
   return `${lat.toFixed(6)}:${lng.toFixed(6)}`;
 }
@@ -109,10 +80,15 @@ function sanitizeMapCoordinates(
   }
 
   // Pass 1: drop near-duplicate jitter points.
-  const deduped: { latitude: number; longitude: number }[] = [points[0] as { latitude: number; longitude: number }];
+  const deduped: { latitude: number; longitude: number }[] = [
+    points[0] as { latitude: number; longitude: number },
+  ];
   for (let i = 1; i < points.length; i += 1) {
     const candidate = points[i] as { latitude: number; longitude: number };
-    const prev = deduped[deduped.length - 1] as { latitude: number; longitude: number };
+    const prev = deduped[deduped.length - 1] as {
+      latitude: number;
+      longitude: number;
+    };
     if (approxDistanceM(prev, candidate) >= 3) {
       deduped.push(candidate);
     }
@@ -123,9 +99,14 @@ function sanitizeMapCoordinates(
   }
 
   // Pass 2: remove tiny "out-and-back" spikes that look like branches.
-  const cleaned: { latitude: number; longitude: number }[] = [deduped[0] as { latitude: number; longitude: number }];
+  const cleaned: { latitude: number; longitude: number }[] = [
+    deduped[0] as { latitude: number; longitude: number },
+  ];
   for (let i = 1; i < deduped.length - 1; i += 1) {
-    const a = cleaned[cleaned.length - 1] as { latitude: number; longitude: number };
+    const a = cleaned[cleaned.length - 1] as {
+      latitude: number;
+      longitude: number;
+    };
     const b = deduped[i] as { latitude: number; longitude: number };
     const c = deduped[i + 1] as { latitude: number; longitude: number };
 
@@ -151,13 +132,19 @@ function sanitizeMapCoordinates(
     }
   }
 
-  cleaned.push(deduped[deduped.length - 1] as { latitude: number; longitude: number });
+  cleaned.push(
+    deduped[deduped.length - 1] as { latitude: number; longitude: number },
+  );
   return cleaned;
 }
 
-function toMapCoordinates(segment: RouteSegment): { latitude: number; longitude: number }[] {
+function toMapCoordinates(
+  segment: RouteSegment,
+): { latitude: number; longitude: number }[] {
   const geometry = segment.coordinates
-    ?.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    ?.filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
+    )
     .map((point) => ({ latitude: point.lat, longitude: point.lng }));
 
   if (geometry && geometry.length >= 2) {
@@ -179,9 +166,10 @@ function getSelectedRoute(
     return null;
   }
 
-  const routeChoices = Array.isArray(routeResult.routes) && routeResult.routes.length > 0
-    ? routeResult.routes
-    : [routeResult, ...(routeResult.alternatives ?? [])];
+  const routeChoices =
+    Array.isArray(routeResult.routes) && routeResult.routes.length > 0
+      ? routeResult.routes
+      : [routeResult, ...(routeResult.alternatives ?? [])];
 
   if (selectedRouteIndex >= 0 && selectedRouteIndex < routeChoices.length) {
     return routeChoices[selectedRouteIndex] as NavigationRouteResult;
@@ -296,7 +284,10 @@ function buildNaturalRouteFallbackMessage(
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+  const topOverlayInset = Math.max(insets.top, 10) + 8;
   const mapRef = useRef<any>(null);
+  const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
   const parseNavigationTextMutation = useParseNavigationTextMutation();
 
@@ -315,23 +306,12 @@ export default function HomeScreen() {
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
   const [naturalRouteText, setNaturalRouteText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
 
   const selectedRoute = useMemo(
     () => getSelectedRoute(routeResult, selectedAlternativeIndex),
     [routeResult, selectedAlternativeIndex],
   );
-
-  const routeChoices = useMemo(() => {
-    if (!routeResult) {
-      return [] as NavigationRouteResult[];
-    }
-
-    if (Array.isArray(routeResult.routes) && routeResult.routes.length > 0) {
-      return routeResult.routes;
-    }
-
-    return [routeResult, ...(routeResult.alternatives ?? [])];
-  }, [routeResult]);
 
   useEffect(() => {
     const detect = async () => {
@@ -411,7 +391,11 @@ export default function HomeScreen() {
       }
     };
 
-    pushUniquePoint(selectedRoute.from.lat, selectedRoute.from.lng, pointName(0));
+    pushUniquePoint(
+      selectedRoute.from.lat,
+      selectedRoute.from.lng,
+      pointName(0),
+    );
 
     selectedRoute.segments.forEach((segment, index) => {
       pushUniquePoint(segment.to.lat, segment.to.lng, pointName(index + 1));
@@ -594,6 +578,47 @@ export default function HomeScreen() {
     setMapSelectionMode("destination");
     setError(null);
     setSelectedAlternativeIndex(0);
+  };
+
+  const searchPlace = async (query: string) => {
+    const searchText = query.trim();
+    if (!searchText) {
+      return;
+    }
+
+    setIsSearchingPlace(true);
+    try {
+      const matches = await Location.geocodeAsync(searchText);
+      if (matches.length === 0) {
+        Alert.alert("No place found", "Try a more specific place name.");
+        return;
+      }
+
+      const first = matches[0];
+      const point: LocationDTO = {
+        lat: first.latitude,
+        lng: first.longitude,
+        label: searchText,
+      };
+
+      setDestination(point);
+      setRouteResult(null);
+      setMapSelectionMode("destination");
+
+      mapRef.current?.animateToRegion(
+        {
+          latitude: point.lat,
+          longitude: point.lng,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        },
+        350,
+      );
+    } catch {
+      Alert.alert("Search failed", "Could not search places right now.");
+    } finally {
+      setIsSearchingPlace(false);
+    }
   };
 
   return (
@@ -785,6 +810,17 @@ const styles = StyleSheet.create({
   },
   sheetExpanded: {
     maxHeight: "76%",
+  },
+  sheetCollapsed: {
+    maxHeight: 122,
+    minHeight: 94,
+  },
+  sheetScroll: {
+    flexGrow: 0,
+  },
+  sheetContent: {
+    gap: 8,
+    paddingBottom: 8,
   },
   title: {
     color: Colors.dark.text,
