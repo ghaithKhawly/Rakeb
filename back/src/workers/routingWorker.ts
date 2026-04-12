@@ -42,6 +42,13 @@ const EPSILON = 1e-9;
 function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult {
   const { graph, from, to, routeMetrics, config } = payload;
   const walkingMode = payload.walkingMode ?? "dynamic";
+  const maxExpandedStates = Math.max(
+    20_000,
+    Number(process.env.ROUTING_MAX_EXPANDED_STATES ?? 80_000),
+  );
+  const allowStartAnchorOverCap = payload.relaxation?.allowStartAnchorOverCap === true;
+  const allowEndAnchorOverCap = payload.relaxation?.allowEndAnchorOverCap === true;
+  const requireBusSegment = payload.relaxation?.requireBusSegment === true;
   const diagnostics = createDiagnostics();
   const longWalkThresholdM = Math.max(1000, Math.min(config.maxWalkingDistanceM * 0.9, config.maxWalkingDistanceM));
   const minBusDistanceBetweenLongWalksM = Math.max(800, config.maxTotalWalkingDistanceM * 0.25);
@@ -77,8 +84,6 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
   const metricsByRoute: RouteMetricsById = new Map(routeMetrics.map((metric: RouteLiveMetricForRouting) => [metric.routeId, metric]));
 
   const startNeighbors = findAnchorNodeIds(from, indexes);
-  const endNeighbors = findAnchorNodeIds(to, indexes);
-  const endNeighborSet = new Set(endNeighbors.map((n) => n.nodeId));
 
   if (process.env.DEBUG_ROUTING === "1") {
     console.warn("[routing-worker] search start", JSON.stringify({
@@ -86,7 +91,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       from,
       to,
       startNeighborsCount: startNeighbors.length,
-      endNeighborsCount: endNeighbors.length,
+      endNeighborsCount: 0,
       config: {
         maxWalkingDistanceM: config.maxWalkingDistanceM,
         maxTotalWalkingDistanceM: config.maxTotalWalkingDistanceM,
@@ -117,6 +122,13 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     }
 
     diagnostics.expandedStates += 1;
+    if (diagnostics.expandedStates > maxExpandedStates) {
+      logRoutingDiagnostics(diagnostics, payload, startNeighbors.length, 0, walkingMode);
+      throw new Error(
+        `Routing search budget exceeded before finding a path | expanded=${diagnostics.expandedStates} max=${maxExpandedStates} diagnostics=${JSON.stringify(diagnostics)}`,
+      );
+    }
+
     if (diagnostics.bestFrontierCost === null || current.fScore < diagnostics.bestFrontierCost) {
       diagnostics.bestFrontierCost = current.fScore;
       diagnostics.bestFrontierWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
@@ -141,6 +153,11 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       for (const neighbor of startNeighbors) {
         if (neighbor.nodeId === START_NODE_ID) {
           diagnostics.prunedAnchors += 1;
+          continue;
+        }
+
+        if (!allowStartAnchorOverCap && neighbor.distanceM > config.maxWalkingDistanceM) {
+          diagnostics.prunedMaxSingleWalk += 1;
           continue;
         }
 
@@ -199,8 +216,8 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
           }
         }
 
-        if (endNeighborSet.has(currentState.nodeId)) {
-          const endDistance = haversineDistanceM(currentLocation, to);
+        const endDistance = haversineDistanceM(currentLocation, to);
+        if (allowEndAnchorOverCap || endDistance <= config.maxWalkingDistanceM) {
           candidateEdges.push(buildWalkingEdge(
             currentState.nodeId,
             END_NODE_ID,
@@ -214,17 +231,19 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     diagnostics.generatedEdges += candidateEdges.length;
 
     for (const edge of candidateEdges) {
-      const isAnchorWalkingEdge = edge.mode === "walk"
-        && (edge.fromNodeId === START_NODE_ID || edge.toNodeId === END_NODE_ID);
+      const isStartAnchorWalk = edge.mode === "walk" && edge.fromNodeId === START_NODE_ID;
+      const isEndAnchorWalk = edge.mode === "walk" && edge.toNodeId === END_NODE_ID;
+      const startAnchorAllowed = isStartAnchorWalk && allowStartAnchorOverCap;
+      const endAnchorAllowed = isEndAnchorWalk && allowEndAnchorOverCap;
 
-      if (!isAnchorWalkingEdge && edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
+      if (!startAnchorAllowed && !endAnchorAllowed && edge.mode === "walk" && edge.distanceM > config.maxWalkingDistanceM) {
         diagnostics.prunedMaxSingleWalk += 1;
         continue;
       }
 
       const existingWalkM = cumulativeWalkM.get(current.stateKey) ?? 0;
       const projectedWalkM = existingWalkM + (edge.mode === "walk" ? edge.distanceM : 0);
-      if (!isAnchorWalkingEdge && projectedWalkM > config.maxTotalWalkingDistanceM) {
+      if (projectedWalkM > config.maxTotalWalkingDistanceM) {
         diagnostics.prunedMaxTotalWalk += 1;
         continue;
       }
@@ -242,8 +261,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
       const isLongWalkEdge = edge.mode === "walk" && edge.distanceM >= longWalkThresholdM;
       if (
-        !isAnchorWalkingEdge
-        && enforceLongWalkSpacing
+        enforceLongWalkSpacing
         && isLongWalkEdge
         && currentState.hasLongWalk
         && currentState.busDistanceSinceLongWalkM + EPSILON < minBusDistanceBetweenLongWalksM
@@ -308,7 +326,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
 
   if (!finalKey) {
     diagnostics.prunedMissingState = gScore.size;
-    logRoutingDiagnostics(diagnostics, payload, startNeighbors.length, endNeighbors.length, walkingMode);
+    logRoutingDiagnostics(diagnostics, payload, startNeighbors.length, 0, walkingMode);
     throw new Error(`No route found between origin and destination under current constraints | diagnostics=${JSON.stringify(diagnostics)}`);
   }
 
@@ -339,6 +357,10 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     .filter((step) => step.mode === "walk")
     .reduce((sum, step) => sum + step.distanceM, 0);
   const etaSeconds = steps.reduce((sum, step) => sum + step.timeSeconds, 0);
+
+  if (requireBusSegment && !steps.some((step) => step.mode === "bus")) {
+    throw new Error("No transit-first route found under current constraints");
+  }
 
   const segments: RouteSegment[] = [];
   for (const step of steps) {

@@ -28,11 +28,15 @@ type RoutePlanningContextType = {
   currentLocation: LocationDTO | null;
   destination: LocationDTO | null;
   routeResult: NavigationRouteResult | null;
+  routeOptions: NavigationRouteResult[];
+  selectedRoute: NavigationRouteResult | null;
+  selectedRouteIndex: number;
   preferences: RoutingPreferenceWeights;
   isRouting: boolean;
   routingError: string | null;
   setCurrentLocation: (location: LocationDTO | null) => void;
   setDestination: (destination: LocationDTO | null) => void;
+  setSelectedRouteIndex: (index: number) => void;
   updatePreference: (
     key: keyof RoutingPreferenceWeights,
     value: number,
@@ -65,6 +69,7 @@ export function RoutePlanningProvider({
   const [routeResult, setRouteResult] = useState<NavigationRouteResult | null>(
     null,
   );
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [preferences, setPreferences] =
     useState<RoutingPreferenceWeights>(defaultPreferences);
   const [isRouting, setIsRouting] = useState(false);
@@ -81,6 +86,7 @@ export function RoutePlanningProvider({
   const clearRoute = useCallback(() => {
     setRouteResult(null);
     setRoutingError(null);
+    setSelectedRouteIndex(0);
   }, []);
 
   const computeRoute = useCallback(async () => {
@@ -99,6 +105,7 @@ export function RoutePlanningProvider({
         preferences,
       });
       setRouteResult(result);
+      setSelectedRouteIndex(0);
     } catch (error) {
       const fallbackMessage =
         "Unable to compute route right now. Please try again.";
@@ -109,16 +116,41 @@ export function RoutePlanningProvider({
     }
   }, [currentLocation, destination, preferences]);
 
+  const routeOptions = useMemo(() => {
+    if (!routeResult) {
+      return [] as NavigationRouteResult[];
+    }
+
+    if (Array.isArray(routeResult.routes) && routeResult.routes.length > 0) {
+      return routeResult.routes;
+    }
+
+    return [routeResult, ...(routeResult.alternatives ?? [])];
+  }, [routeResult]);
+
+  const selectedRoute = useMemo(() => {
+    if (routeOptions.length === 0) {
+      return null;
+    }
+
+    const safeIndex = Math.max(0, Math.min(selectedRouteIndex, routeOptions.length - 1));
+    return routeOptions[safeIndex] ?? null;
+  }, [routeOptions, selectedRouteIndex]);
+
   const value = useMemo(
     () => ({
       currentLocation,
       destination,
       routeResult,
+      routeOptions,
+      selectedRoute,
+      selectedRouteIndex,
       preferences,
       isRouting,
       routingError,
       setCurrentLocation,
       setDestination,
+      setSelectedRouteIndex,
       updatePreference,
       computeRoute,
       clearRoute,
@@ -127,6 +159,9 @@ export function RoutePlanningProvider({
       currentLocation,
       destination,
       routeResult,
+      routeOptions,
+      selectedRoute,
+      selectedRouteIndex,
       preferences,
       isRouting,
       routingError,

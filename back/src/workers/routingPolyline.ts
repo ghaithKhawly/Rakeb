@@ -8,6 +8,12 @@ function samePoint(a: LocationDTO | null | undefined, b: LocationDTO | null | un
   return Math.abs(a.lat - b.lat) <= epsilon && Math.abs(a.lng - b.lng) <= epsilon;
 }
 
+function pointDistanceSq(a: LocationDTO, b: LocationDTO): number {
+  const dLat = a.lat - b.lat;
+  const dLng = a.lng - b.lng;
+  return (dLat * dLat) + (dLng * dLng);
+}
+
 export function parseGeoJsonPolyline(geom: string | null | undefined): LocationDTO[] {
   if (!geom) {
     return [];
@@ -62,7 +68,22 @@ export function ensurePolylineEndpoints(
   to: LocationDTO,
 ): LocationDTO[] {
   const normalized = normalizePolyline(points);
-  const result = normalized.length > 0 ? [...normalized] : [from, to];
+  let oriented = normalized.length > 0 ? [...normalized] : [from, to];
+
+  // Some DB geometries are stored opposite to traversal direction.
+  // Reverse polyline when the opposite orientation fits endpoints better.
+  if (oriented.length >= 2) {
+    const first = oriented[0] as LocationDTO;
+    const last = oriented[oriented.length - 1] as LocationDTO;
+    const forwardScore = pointDistanceSq(first, from) + pointDistanceSq(last, to);
+    const reverseScore = pointDistanceSq(first, to) + pointDistanceSq(last, from);
+
+    if (reverseScore + 1e-12 < forwardScore) {
+      oriented = [...oriented].reverse();
+    }
+  }
+
+  const result = [...oriented];
 
   if (!samePoint(result[0], from)) {
     result.unshift(from);

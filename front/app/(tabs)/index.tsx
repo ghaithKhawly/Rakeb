@@ -78,6 +78,107 @@ function pointId(lat: number, lng: number): string {
   return `${lat.toFixed(6)}:${lng.toFixed(6)}`;
 }
 
+function approxDistanceM(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const latScaleM = 111_320;
+  const avgLatRad = ((a.latitude + b.latitude) / 2) * (Math.PI / 180);
+  const lngScaleM = 111_320 * Math.cos(avgLatRad);
+  const dLatM = (b.latitude - a.latitude) * latScaleM;
+  const dLngM = (b.longitude - a.longitude) * lngScaleM;
+  return Math.hypot(dLatM, dLngM);
+}
+
+function sanitizeMapCoordinates(
+  points: { latitude: number; longitude: number }[],
+): { latitude: number; longitude: number }[] {
+  if (points.length < 3) {
+    return points;
+  }
+
+  // Pass 1: drop near-duplicate jitter points.
+  const deduped: { latitude: number; longitude: number }[] = [points[0] as { latitude: number; longitude: number }];
+  for (let i = 1; i < points.length; i += 1) {
+    const candidate = points[i] as { latitude: number; longitude: number };
+    const prev = deduped[deduped.length - 1] as { latitude: number; longitude: number };
+    if (approxDistanceM(prev, candidate) >= 3) {
+      deduped.push(candidate);
+    }
+  }
+
+  if (deduped.length < 3) {
+    return deduped;
+  }
+
+  // Pass 2: remove tiny "out-and-back" spikes that look like branches.
+  const cleaned: { latitude: number; longitude: number }[] = [deduped[0] as { latitude: number; longitude: number }];
+  for (let i = 1; i < deduped.length - 1; i += 1) {
+    const a = cleaned[cleaned.length - 1] as { latitude: number; longitude: number };
+    const b = deduped[i] as { latitude: number; longitude: number };
+    const c = deduped[i + 1] as { latitude: number; longitude: number };
+
+    const ab = approxDistanceM(a, b);
+    const bc = approxDistanceM(b, c);
+    const ac = approxDistanceM(a, c);
+
+    const v1x = b.longitude - a.longitude;
+    const v1y = b.latitude - a.latitude;
+    const v2x = c.longitude - b.longitude;
+    const v2y = c.latitude - b.latitude;
+    const v1Len = Math.hypot(v1x, v1y);
+    const v2Len = Math.hypot(v2x, v2y);
+
+    let cosine = 1;
+    if (v1Len > 0 && v2Len > 0) {
+      cosine = (v1x * v2x + v1y * v2y) / (v1Len * v2Len);
+    }
+
+    const isTinySpike = cosine < -0.7 && ab < 120 && bc < 120 && ac < 45;
+    if (!isTinySpike) {
+      cleaned.push(b);
+    }
+  }
+
+  cleaned.push(deduped[deduped.length - 1] as { latitude: number; longitude: number });
+  return cleaned;
+}
+
+function toMapCoordinates(segment: RouteSegment): { latitude: number; longitude: number }[] {
+  const geometry = segment.coordinates
+    ?.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    .map((point) => ({ latitude: point.lat, longitude: point.lng }));
+
+  if (geometry && geometry.length >= 2) {
+    return sanitizeMapCoordinates(geometry);
+  }
+
+  // Fallback for older/cached payloads that may not include detailed geometry
+  return [
+    { latitude: segment.from.lat, longitude: segment.from.lng },
+    { latitude: segment.to.lat, longitude: segment.to.lng },
+  ];
+}
+
+function getSelectedRoute(
+  routeResult: NavigationRouteResult | null,
+  selectedRouteIndex: number,
+): NavigationRouteResult | null {
+  if (!routeResult) {
+    return null;
+  }
+
+  const routeChoices = Array.isArray(routeResult.routes) && routeResult.routes.length > 0
+    ? routeResult.routes
+    : [routeResult, ...(routeResult.alternatives ?? [])];
+
+  if (selectedRouteIndex >= 0 && selectedRouteIndex < routeChoices.length) {
+    return routeChoices[selectedRouteIndex] as NavigationRouteResult;
+  }
+
+  return routeResult;
+}
+
 function extractApiErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
     const data = error.response?.data as
@@ -87,7 +188,7 @@ function extractApiErrorMessage(error: unknown): string {
           details?:
             | string
             | { message?: string }
-            | Array<{ field?: string; message?: string }>;
+            | { field?: string; message?: string }[];
         }
       | string
       | undefined;
@@ -159,11 +260,29 @@ export default function HomeScreen() {
   const [routeResult, setRouteResult] = useState<NavigationRouteResult | null>(
     null,
   );
+  const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
   const [mapSelectionMode, setMapSelectionMode] = useState<
     "start" | "destination"
   >("destination");
   const [isRouting, setIsRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedRoute = useMemo(
+    () => getSelectedRoute(routeResult, selectedAlternativeIndex),
+    [routeResult, selectedAlternativeIndex],
+  );
+
+  const routeChoices = useMemo(() => {
+    if (!routeResult) {
+      return [] as NavigationRouteResult[];
+    }
+
+    if (Array.isArray(routeResult.routes) && routeResult.routes.length > 0) {
+      return routeResult.routes;
+    }
+
+    return [routeResult, ...(routeResult.alternatives ?? [])];
+  }, [routeResult]);
 
   useEffect(() => {
     const detect = async () => {
@@ -199,23 +318,20 @@ export default function HomeScreen() {
   }, []);
 
   const polylines = useMemo(() => {
-    if (!routeResult) {
+    if (!selectedRoute) {
       return [];
     }
 
-    return routeResult.segments.map((segment, idx) => ({
+    return selectedRoute.segments.map((segment, idx) => ({
       id: `${segment.mode}-${segment.routeId ?? "walk"}-${idx}`,
       color: segment.mode === "walk" ? "#F97316" : Colors.dark.primary,
       width: segment.mode === "walk" ? 4 : 6,
-      coordinates: [
-        { latitude: segment.from.lat, longitude: segment.from.lng },
-        { latitude: segment.to.lat, longitude: segment.to.lng },
-      ],
+      coordinates: toMapCoordinates(segment),
     }));
-  }, [routeResult]);
+  }, [selectedRoute]);
 
   const routePoints = useMemo(() => {
-    if (!routeResult) {
+    if (!selectedRoute) {
       return [] as {
         id: string;
         label: string;
@@ -246,14 +362,14 @@ export default function HomeScreen() {
       }
     };
 
-    pushUniquePoint(routeResult.from.lat, routeResult.from.lng, pointName(0));
+    pushUniquePoint(selectedRoute.from.lat, selectedRoute.from.lng, pointName(0));
 
-    routeResult.segments.forEach((segment, index) => {
+    selectedRoute.segments.forEach((segment, index) => {
       pushUniquePoint(segment.to.lat, segment.to.lng, pointName(index + 1));
     });
 
     return points;
-  }, [routeResult]);
+  }, [selectedRoute]);
 
   const pointColorByLabel = useMemo(() => {
     return routePoints.reduce<Record<string, string>>((acc, point) => {
@@ -273,6 +389,7 @@ export default function HomeScreen() {
 
     setIsRouting(true);
     setError(null);
+    setSelectedAlternativeIndex(0);
 
     try {
       const savedPrefs = routingPreferencesQuery.data;
@@ -307,10 +424,7 @@ export default function HomeScreen() {
         });
       }
 
-      const coords = response.data.segments.flatMap((segment) => [
-        { latitude: segment.from.lat, longitude: segment.from.lng },
-        { latitude: segment.to.lat, longitude: segment.to.lng },
-      ]);
+      const coords = response.data.segments.flatMap((segment) => toMapCoordinates(segment));
 
       if (coords.length >= 2) {
         mapRef.current?.fitToCoordinates(coords, {
@@ -331,6 +445,7 @@ export default function HomeScreen() {
   const clearRoute = () => {
     setRouteResult(null);
     setError(null);
+    setSelectedAlternativeIndex(0);
   };
 
   return (
@@ -507,24 +622,80 @@ export default function HomeScreen() {
 
           {routeResult ? (
             <>
+              <View style={styles.routeLabelRow}>
+                <ThemedText type="defaultSemiBold" style={styles.routeLabel}>
+                  {selectedRoute?.routeLabel || "Best Route"}
+                </ThemedText>
+                {selectedRoute?.bestEffort ? (
+                  <View style={styles.bestEffortBadge}>
+                    <ThemedText style={styles.bestEffortBadgeText}>
+                      Best-Effort
+                    </ThemedText>
+                  </View>
+                ) : null}
+              </View>
+
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryText}>
-                  ETA: {Math.max(1, Math.round(routeResult.etaSeconds / 60))}{" "}
+                  ETA: {Math.max(1, Math.round((selectedRoute?.etaSeconds ?? 0) / 60))}{" "}
                   min
                 </ThemedText>
                 <ThemedText style={styles.summaryText}>
-                  Transfers: {routeResult.transferCount}
-                </ThemedText>
-                <ThemedText style={styles.summaryText}>
-                  Walk: {Math.round(routeResult.walkingDistanceM)}m
+                  Walk: {Math.round(selectedRoute?.walkingDistanceM ?? 0)}m
                 </ThemedText>
               </View>
+
+              {routeChoices.length > 1 ? (
+                <View style={styles.alternativesContainer}>
+                  <ThemedText style={styles.alternativesLabel}>
+                    Route Options
+                  </ThemedText>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.alternativesScroll}
+                    contentContainerStyle={styles.alternativesContent}
+                  >
+                    {routeChoices.map((option, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[
+                          styles.alternativeCard,
+                          selectedAlternativeIndex === idx &&
+                            styles.alternativeCardActive,
+                        ]}
+                        onPress={() => setSelectedAlternativeIndex(idx)}
+                      >
+                        <ThemedText
+                          style={[
+                            styles.altCardLabel,
+                            selectedAlternativeIndex === idx &&
+                              styles.altCardLabelActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {option.routeLabel || (idx === 0 ? "Best" : `Alt ${idx}`)}
+                        </ThemedText>
+                        <ThemedText
+                          style={[
+                            styles.altCardMetric,
+                            selectedAlternativeIndex === idx &&
+                              styles.altCardMetricActive,
+                          ]}
+                        >
+                          {Math.max(1, Math.round(option.etaSeconds / 60))} min
+                        </ThemedText>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
 
               <ScrollView
                 style={styles.stepsWrap}
                 showsVerticalScrollIndicator={false}
               >
-                {routeResult.segments.map((segment, index) => (
+                {selectedRoute?.segments.map((segment, index) => (
                   <View
                     key={`${segment.mode}-${index}`}
                     style={styles.stepCard}
@@ -566,6 +737,18 @@ export default function HomeScreen() {
                         </ThemedText>
                       </View>
                     </View>
+                    <View style={styles.stepMetaRow}>
+                      <View
+                        style={[
+                          styles.modePill,
+                          segment.mode === "walk" ? styles.walkPill : styles.busPill,
+                        ]}
+                      >
+                        <ThemedText style={styles.modePillText}>
+                          {segment.mode === "walk" ? "Walk" : "Bus"}
+                        </ThemedText>
+                      </View>
+                    </View>
                     <ThemedText style={styles.stepTitle}>
                       {stepTitle(segment)}
                     </ThemedText>
@@ -573,7 +756,7 @@ export default function HomeScreen() {
                       {stepDetails(segment, index)}
                     </ThemedText>
                   </View>
-                ))}
+                )) ?? null}
               </ScrollView>
             </>
           ) : null}
@@ -597,7 +780,7 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     bottom: 12,
-    maxHeight: "52%",
+    maxHeight: "62%",
     backgroundColor: Colors.dark.surface,
     borderWidth: 1,
     borderColor: Colors.dark.border,
@@ -688,7 +871,11 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 4,
+    marginTop: 6,
+    backgroundColor: "#F3F6FF",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   summaryText: {
     color: Colors.dark.text,
@@ -712,6 +899,26 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 6,
   },
+  stepMetaRow: {
+    flexDirection: "row",
+    marginBottom: 4,
+  },
+  modePill: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  walkPill: {
+    backgroundColor: "#FFF3E6",
+  },
+  busPill: {
+    backgroundColor: "#E8EDFF",
+  },
+  modePillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: Colors.dark.icon,
+  },
   pointBadge: {
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -731,5 +938,76 @@ const styles = StyleSheet.create({
     color: Colors.dark.icon,
     fontSize: 12,
     marginTop: 4,
+  },
+  routeLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  routeLabel: {
+    color: Colors.dark.primary,
+    fontSize: 14,
+  },
+  alternativesContainer: {
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  alternativesLabel: {
+    color: Colors.dark.icon,
+    fontSize: 11,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  alternativesScroll: {
+    marginHorizontal: -12,
+    paddingHorizontal: 12,
+  },
+  alternativesContent: {
+    gap: 8,
+  },
+  alternativeCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    backgroundColor: Colors.dark.background,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 118,
+  },
+  alternativeCardActive: {
+    borderColor: Colors.dark.primary,
+    backgroundColor: "rgba(45, 212, 191, 0.15)",
+  },
+  altCardLabel: {
+    color: Colors.dark.text,
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  altCardLabelActive: {
+    color: Colors.dark.primary,
+  },
+  altCardMetric: {
+    color: Colors.dark.icon,
+    fontSize: 11,
+    marginVertical: 2,
+  },
+  altCardMetricActive: {
+    color: Colors.dark.text,
+  },
+  bestEffortBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "#FFF8E6",
+    borderWidth: 1,
+    borderColor: "#E7D39C",
+  },
+  bestEffortBadgeText: {
+    color: "#8A6116",
+    fontSize: 10,
+    fontWeight: "700",
   },
 });

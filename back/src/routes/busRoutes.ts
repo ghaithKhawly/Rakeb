@@ -164,13 +164,191 @@ function normalizeRouteResultForSchema(
   const baseFrom = result.from ?? requestFrom;
   const baseTo = result.to ?? requestTo;
 
-  return {
+  const normalizedResult = {
     ...result,
     from: baseFrom,
     to: baseTo,
     segments: (Array.isArray(result.segments) ? result.segments : []).map((segment) =>
       normalizeRouteSegment(segment, baseFrom, baseTo),
     ),
+  };
+
+  const normalizedRoutes = Array.isArray(result.routes)
+    ? result.routes.map((route) => ({
+      ...route,
+      from: route.from ?? baseFrom,
+      to: route.to ?? baseTo,
+      segments: (Array.isArray(route.segments) ? route.segments : []).map((segment) =>
+        normalizeRouteSegment(segment, route.from ?? baseFrom, route.to ?? baseTo),
+      ),
+    }))
+    : null;
+
+  const normalizedAlternatives = Array.isArray(result.alternatives)
+    ? result.alternatives.map((route) => ({
+      ...route,
+      from: route.from ?? baseFrom,
+      to: route.to ?? baseTo,
+      segments: (Array.isArray(route.segments) ? route.segments : []).map((segment) =>
+        normalizeRouteSegment(segment, route.from ?? baseFrom, route.to ?? baseTo),
+      ),
+    }))
+    : null;
+
+  return {
+    ...normalizedResult,
+    routes: normalizedRoutes ?? [normalizedResult, ...(normalizedAlternatives ?? [])],
+    primaryRouteIndex: typeof result.primaryRouteIndex === "number"
+      ? result.primaryRouteIndex
+      : 0,
+    alternatives: normalizedAlternatives ?? result.alternatives,
+    primaryAlternativeIndex: typeof result.primaryAlternativeIndex === "number"
+      ? result.primaryAlternativeIndex
+      : 0,
+  };
+}
+
+type RouteProfile = {
+  id: string;
+  label: string;
+  weights: RoutingPreferenceWeights;
+  configTweaks?: Partial<Pick<EffectiveRoutingConfig, "maxWalkingDistanceM" | "maxTotalWalkingDistanceM" | "maxBusTransfers" | "maxWalkingNeighbors">>;
+};
+
+function buildAlternativeProfiles(baseWeights: RoutingPreferenceWeights): RouteProfile[] {
+  const balanced = normalizeWeights(baseWeights);
+
+  return [
+    { id: "balanced", label: "Best", weights: balanced },
+    {
+      id: "less_walking",
+      label: "Less Walking",
+      weights: normalizeWeights({
+        ...balanced,
+        walking: balanced.walking * 3.2,
+        speed: balanced.speed * 1.1,
+      }),
+    },
+    {
+      id: "fewer_transfers",
+      label: "Fewer Transfers",
+      weights: normalizeWeights({
+        ...balanced,
+        transfer: balanced.transfer * 3.0,
+        walking: balanced.walking * 1.3,
+      }),
+    },
+    {
+      id: "cheaper",
+      label: "Cheaper",
+      weights: normalizeWeights({
+        ...balanced,
+        price: balanced.price * 3.0,
+        speed: balanced.speed * 0.9,
+      }),
+    },
+    {
+      id: "fastest",
+      label: "Fastest",
+      weights: normalizeWeights({
+        ...balanced,
+        speed: balanced.speed * 3.2,
+        transfer: balanced.transfer * 0.8,
+        walking: balanced.walking * 0.7,
+      }),
+    },
+  ];
+}
+
+function routeFingerprint(result: NavigationRouteResult): string {
+  const modeShape = result.segments
+    .map((segment) => `${segment.mode}:${segment.routeId ?? "walk"}`)
+    .join(">");
+  const walkBucket = Math.round(result.walkingDistanceM / 100);
+  return `${modeShape}|walk${walkBucket}|t${result.transferCount}`;
+}
+
+function busRouteSignature(result: NavigationRouteResult): string {
+  return result.segments
+    .filter((segment) => segment.mode === "bus" && typeof segment.routeId === "number")
+    .map((segment) => String(segment.routeId))
+    .join(">");
+}
+
+function relativeDelta(a: number, b: number): number {
+  const baseline = Math.max(1, Math.abs(a), Math.abs(b));
+  return Math.abs(a - b) / baseline;
+}
+
+function estimateDirectDistanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusM = 6_371_000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return earthRadiusM * c;
+}
+
+function isMeaningfullyDifferentRoute(
+  candidate: NavigationRouteResult,
+  existingRoutes: NavigationRouteResult[],
+): boolean {
+  const candidateBusSignature = busRouteSignature(candidate);
+
+  for (const existing of existingRoutes) {
+    const existingBusSignature = busRouteSignature(existing);
+    const sameBusSignature = candidateBusSignature === existingBusSignature;
+    const sameTransfers = candidate.transferCount === existing.transferCount;
+    const similarWalking = relativeDelta(candidate.walkingDistanceM, existing.walkingDistanceM) < 0.15;
+    const similarEta = relativeDelta(candidate.etaSeconds, existing.etaSeconds) < 0.12;
+
+    if (sameBusSignature && sameTransfers && similarWalking && similarEta) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function applyProfileConfig(
+  baseConfig: EffectiveRoutingConfig,
+  profile: RouteProfile,
+): EffectiveRoutingConfig {
+  let maxWalkingDistanceM = profile.configTweaks?.maxWalkingDistanceM
+    ?? baseConfig.maxWalkingDistanceM;
+
+  if (profile.id === "less_walking") {
+    maxWalkingDistanceM = Math.max(250, Math.round(baseConfig.maxWalkingDistanceM * 0.7));
+  }
+
+  let maxTotalWalkingDistanceM = Math.max(
+    profile.configTweaks?.maxTotalWalkingDistanceM ?? baseConfig.maxTotalWalkingDistanceM,
+    maxWalkingDistanceM,
+  );
+
+  if (profile.id === "less_walking") {
+    maxTotalWalkingDistanceM = Math.max(maxWalkingDistanceM, Math.round(baseConfig.maxTotalWalkingDistanceM * 0.75));
+  }
+
+  let maxBusTransfers = profile.configTweaks?.maxBusTransfers ?? baseConfig.maxBusTransfers;
+  if (profile.id === "fewer_transfers") {
+    maxBusTransfers = Math.max(0, Math.min(baseConfig.maxBusTransfers, 2));
+  } else if (profile.id === "fastest") {
+    maxBusTransfers = Math.max(baseConfig.maxBusTransfers, baseConfig.maxBusTransfers + 2);
+  }
+
+  return {
+    ...baseConfig,
+    weights: profile.weights,
+    maxWalkingDistanceM,
+    maxTotalWalkingDistanceM,
+    maxBusTransfers,
+    maxWalkingNeighbors: profile.configTweaks?.maxWalkingNeighbors ?? baseConfig.maxWalkingNeighbors,
   };
 }
 
@@ -352,7 +530,12 @@ async function refreshRouteLiveMetrics(
 export async function busRoutes(fastify: FastifyInstance) {
   await naturalNavigationRoutes(fastify);
 
-  const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 2500);
+  const workerTimeoutMs = Number(process.env.ROUTING_WORKER_TIMEOUT_MS ?? 12000);
+  const strictAttemptTimeoutMs = Math.max(7000, workerTimeoutMs);
+  const relaxedAttemptTimeoutMs = Math.max(
+    strictAttemptTimeoutMs,
+    Math.floor(strictAttemptTimeoutMs * 1.35),
+  );
   const enableQuickTestRoutes =
     process.env.ENABLE_DEV_QUICK_TEST_ROUTES === "1" || process.env.NODE_ENV !== "production";
   const debugRoutingLogs = process.env.DEBUG_ROUTING_LOGS === "1" || process.env.NODE_ENV !== "production";
@@ -360,15 +543,31 @@ export async function busRoutes(fastify: FastifyInstance) {
   async function routeWithFallback(payload: {
     base: Omit<RoutingWorkerPayload, "walkingMode">;
   }): Promise<NavigationRouteResult> {
+    const directDistanceM = estimateDirectDistanceM(payload.base.from, payload.base.to);
+    const strictTimeoutForRequestMs = Math.min(
+      90_000,
+      Math.max(
+        strictAttemptTimeoutMs,
+        strictAttemptTimeoutMs + Math.floor(directDistanceM * 3.0),
+      ),
+    );
+    const relaxedTimeoutForRequestMs = Math.min(
+      120_000,
+      Math.max(
+        relaxedAttemptTimeoutMs,
+        Math.floor(strictTimeoutForRequestMs * 1.2),
+      ),
+    );
+
     const runAttempt = async (walkingMode: "dynamic" | "precomputed") => {
       const startedAt = Date.now();
       try {
         const result = await routingWorkerClient.route(
           { ...payload.base, walkingMode },
-          { timeoutMs: workerTimeoutMs },
+          { timeoutMs: strictTimeoutForRequestMs },
         );
         fastify.log.info(
-          { walkingMode, elapsedMs: Date.now() - startedAt },
+          { walkingMode, elapsedMs: Date.now() - startedAt, timeoutMs: strictTimeoutForRequestMs },
           "Routing attempt succeeded",
         );
         return result;
@@ -377,6 +576,7 @@ export async function busRoutes(fastify: FastifyInstance) {
           {
             walkingMode,
             elapsedMs: Date.now() - startedAt,
+            timeoutMs: strictTimeoutForRequestMs,
             error: error instanceof Error ? error.message : String(error),
           },
           "Routing attempt failed",
@@ -385,36 +585,68 @@ export async function busRoutes(fastify: FastifyInstance) {
       }
     };
 
-    // Attempt 1: dynamic walking
-    try {
-      const result = await runAttempt("dynamic");
-      return { ...result, bestEffort: false };
-    } catch (error) {
-      fastify.log.warn({ error }, "Dynamic walking routing failed, trying precomputed walking");
+    const strictAttemptOrder: Array<"dynamic" | "precomputed"> = directDistanceM > 9_000
+      ? ["precomputed", "dynamic"]
+      : ["dynamic", "precomputed"];
+
+    for (let idx = 0; idx < strictAttemptOrder.length; idx += 1) {
+      const mode = strictAttemptOrder[idx] as "dynamic" | "precomputed";
+      try {
+        const result = await runAttempt(mode);
+        return { ...result, bestEffort: false };
+      } catch (error) {
+        if (idx < strictAttemptOrder.length - 1) {
+          fastify.log.warn(
+            { error, failedMode: mode, nextMode: strictAttemptOrder[idx + 1] },
+            "Strict routing attempt failed, trying alternate walking mode",
+          );
+        } else {
+          fastify.log.warn({ error, failedMode: mode }, "Strict routing failed, trying relaxed best-effort route");
+        }
+      }
     }
 
-    // Attempt 2: precomputed walking edges
-    try {
-      const result = await runAttempt("precomputed");
-      return { ...result, bestEffort: false };
-    } catch (error) {
-      fastify.log.warn({ error }, "Precomputed walking routing failed, trying relaxed best-effort route");
-    }
-
-    // Attempt 3: relaxed best-effort (loosen total walking + transfers)
+    // Attempt 3: transit-first best-effort.
+    // Allow over-cap start-anchor walk to reach transit, but avoid all-walk destination fallback.
+    const relaxedTotalWalkingCapM = Math.max(
+      payload.base.config.maxTotalWalkingDistanceM,
+      Math.round(directDistanceM * 1.6),
+      payload.base.config.maxWalkingDistanceM * 3,
+      6_000,
+    );
     const relaxedConfig: EffectiveRoutingConfig = {
       ...payload.base.config,
-      maxTotalWalkingDistanceM: Number.MAX_SAFE_INTEGER,
-      maxBusTransfers: Math.max(payload.base.config.maxBusTransfers, 10),
+      maxTotalWalkingDistanceM: relaxedTotalWalkingCapM,
+      maxWalkingNeighbors: Math.max(
+        6,
+        Math.min(
+          payload.base.config.maxWalkingNeighbors,
+          directDistanceM > 9_000 ? 8 : payload.base.config.maxWalkingNeighbors,
+        ),
+      ),
+      maxBusTransfers: Math.max(payload.base.config.maxBusTransfers, 8),
+      weights: normalizeWeights({
+        ...payload.base.config.weights,
+        walking: payload.base.config.weights.walking * 3.0,
+        speed: payload.base.config.weights.speed * 1.15,
+      }),
     };
 
     const relaxedPayload: RoutingWorkerPayload = {
       ...payload.base,
       config: relaxedConfig,
       walkingMode: "dynamic",
+      relaxation: {
+        allowStartAnchorOverCap: true,
+        allowEndAnchorOverCap: false,
+        requireBusSegment: true,
+      },
     };
 
-    const result = await routingWorkerClient.route(relaxedPayload, { timeoutMs: workerTimeoutMs });
+    const result = await routingWorkerClient.route(
+      relaxedPayload,
+      { timeoutMs: relaxedTimeoutForRequestMs },
+    );
     return { ...result, bestEffort: true };
   }
 
@@ -538,16 +770,156 @@ export async function busRoutes(fastify: FastifyInstance) {
 
         let routeResult: NavigationRouteResult;
         try {
-          const computedResult = await routeWithFallback({
+          const profiles = buildAlternativeProfiles(config.weights);
+          const seenFingerprints = new Set<string>();
+          const alternatives: NavigationRouteResult[] = [];
+          const primaryProfile = profiles[0] as RouteProfile;
+          const primaryResult = await routeWithFallback({
             base: {
               from: body.from,
               to: body.to,
               graph: snapshot,
               routeMetrics,
-              config,
+              config: applyProfileConfig(config, primaryProfile),
             },
           });
-          routeResult = normalizeRouteResultForSchema(computedResult, body.from, body.to);
+
+          const normalizedPrimary = normalizeRouteResultForSchema(primaryResult, body.from, body.to);
+          normalizedPrimary.routeLabel = primaryProfile.label;
+          normalizedPrimary.profileId = primaryProfile.id;
+          seenFingerprints.add(routeFingerprint(normalizedPrimary));
+          alternatives.push(normalizedPrimary);
+
+          const altProfiles = profiles.slice(1);
+          for (const profile of altProfiles) {
+            const profileConfig = applyProfileConfig(config, profile);
+            const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+
+            for (const walkingMode of candidateWalkingModes) {
+              try {
+                const computedResult = await routingWorkerClient.route(
+                  {
+                    from: body.from,
+                    to: body.to,
+                    graph: snapshot,
+                    routeMetrics,
+                    config: profileConfig,
+                    walkingMode,
+                  },
+                  { timeoutMs: Math.max(3500, Math.floor(workerTimeoutMs * 0.65)) },
+                );
+
+                const normalizedResult = normalizeRouteResultForSchema(computedResult, body.from, body.to);
+                normalizedResult.routeLabel = profile.label;
+                normalizedResult.profileId = profile.id;
+
+                const fingerprint = routeFingerprint(normalizedResult);
+                if (seenFingerprints.has(fingerprint)) {
+                  continue;
+                }
+
+                if (!isMeaningfullyDifferentRoute(normalizedResult, alternatives)) {
+                  continue;
+                }
+
+                seenFingerprints.add(fingerprint);
+                alternatives.push(normalizedResult);
+
+                break;
+              } catch (error) {
+                fastify.log.warn(
+                  {
+                    profile: profile.id,
+                    walkingMode,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  "Alternative routing profile failed",
+                );
+              }
+            }
+
+            if (alternatives.length >= 4) {
+              break;
+            }
+          }
+
+          // Exploratory candidates fallback: if normal profiles produced only primary route,
+          // try small constraint perturbations to force realistic route divergence
+          if (alternatives.length < 2) {
+            const exploratoryCandidates = [
+              {
+                id: "exploratory_low_transfer",
+                config: {
+                  ...config,
+                  maxBusTransfers: Math.max(0, Math.min(config.maxBusTransfers, 2)),
+                },
+              },
+              {
+                id: "exploratory_bounded_walk",
+                config: {
+                  ...config,
+                  maxWalkingDistanceM: Math.max(250, Math.round(config.maxWalkingDistanceM * 0.85)),
+                  maxTotalWalkingDistanceM: Math.max(
+                    Math.max(250, Math.round(config.maxWalkingDistanceM * 0.85)),
+                    Math.round(config.maxTotalWalkingDistanceM * 0.90),
+                  ),
+                },
+              },
+            ];
+
+            for (const exploratory of exploratoryCandidates) {
+              if (alternatives.length >= 4) {
+                break;
+              }
+
+              try {
+                const exploratoryResult = await routingWorkerClient.route(
+                  {
+                    from: body.from,
+                    to: body.to,
+                    graph: snapshot,
+                    routeMetrics,
+                    config: exploratory.config,
+                    walkingMode: "dynamic",
+                  },
+                  { timeoutMs: Math.max(2500, Math.floor(workerTimeoutMs * 0.5)) },
+                );
+
+                const normalizedResult = normalizeRouteResultForSchema(exploratoryResult, body.from, body.to);
+                normalizedResult.routeLabel = `Alternative (${exploratory.id.replace("exploratory_", "").replace(/_/g, " ")})`;
+                normalizedResult.profileId = exploratory.id;
+
+                const fingerprint = routeFingerprint(normalizedResult);
+                if (seenFingerprints.has(fingerprint)) {
+                  continue;
+                }
+
+                if (!isMeaningfullyDifferentRoute(normalizedResult, alternatives)) {
+                  continue;
+                }
+
+                seenFingerprints.add(fingerprint);
+                alternatives.push(normalizedResult);
+              } catch (error) {
+                fastify.log.debug(
+                  {
+                    exploratory: exploratory.id,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  "Exploratory routing candidate failed",
+                );
+              }
+            }
+          }
+
+          routeResult = {
+            ...alternatives[0],
+            routes: alternatives,
+            primaryRouteIndex: 0,
+            alternatives: alternatives.slice(1),
+            primaryAlternativeIndex: 0,
+          };
+
           if (debugRoutingLogs) {
             const maxSegmentWalkM = routeResult.segments
               .filter((segment) => segment.mode === "walk")
@@ -570,10 +942,13 @@ export async function busRoutes(fastify: FastifyInstance) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const isTimeout = /timed out/i.test(message);
+          const isNoRoute = /No route found|search budget exceeded/i.test(message);
           return reply.code(isTimeout ? 504 : 500).send({
             error: isTimeout
               ? "Routing timed out while searching for a path"
-              : "Routing failed while searching for a path",
+              : isNoRoute
+                ? "No feasible route found under current constraints"
+                : "Routing failed while searching for a path",
             details: message,
           });
         }
@@ -695,24 +1070,150 @@ export async function busRoutes(fastify: FastifyInstance) {
           const config = await getEffectiveRoutingConfig(client, 0, body);
 
           try {
-            const computedResult = await routeWithFallback({
+            const profiles = buildAlternativeProfiles(config.weights);
+            const seenFingerprints = new Set<string>();
+            const alternatives: NavigationRouteResult[] = [];
+            const primaryProfile = profiles[0] as RouteProfile;
+            const primaryResult = await routeWithFallback({
               base: {
                 from: body.from,
                 to: body.to,
                 graph: snapshot,
                 routeMetrics,
-                config,
+                config: applyProfileConfig(config, primaryProfile),
               },
             });
 
-            return normalizeRouteResultForSchema(computedResult, body.from, body.to);
+            const normalizedPrimary = normalizeRouteResultForSchema(primaryResult, body.from, body.to);
+            normalizedPrimary.routeLabel = primaryProfile.label;
+            normalizedPrimary.profileId = primaryProfile.id;
+            seenFingerprints.add(routeFingerprint(normalizedPrimary));
+            alternatives.push(normalizedPrimary);
+
+            const altProfiles = profiles.slice(1);
+            for (const profile of altProfiles) {
+              const profileConfig = applyProfileConfig(config, profile);
+              const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+
+              for (const walkingMode of candidateWalkingModes) {
+                try {
+                  const computedResult = await routingWorkerClient.route(
+                    {
+                      from: body.from,
+                      to: body.to,
+                      graph: snapshot,
+                      routeMetrics,
+                      config: profileConfig,
+                      walkingMode,
+                    },
+                    { timeoutMs: Math.max(3500, Math.floor(workerTimeoutMs * 0.65)) },
+                  );
+
+                  const normalizedResult = normalizeRouteResultForSchema(computedResult, body.from, body.to);
+                  normalizedResult.routeLabel = profile.label;
+                  normalizedResult.profileId = profile.id;
+
+                  const fingerprint = routeFingerprint(normalizedResult);
+                  if (seenFingerprints.has(fingerprint)) {
+                    continue;
+                  }
+
+                  if (!isMeaningfullyDifferentRoute(normalizedResult, alternatives)) {
+                    continue;
+                  }
+
+                  seenFingerprints.add(fingerprint);
+                  alternatives.push(normalizedResult);
+                  break;
+                } catch {
+                  // Keep quick-route responsive; alternatives are best-effort.
+                }
+              }
+
+              if (alternatives.length >= 4) {
+                break;
+              }
+            }
+
+            // Exploratory candidates fallback for quick-route
+            if (alternatives.length < 2) {
+              const exploratoryCandidates = [
+                {
+                  id: "exploratory_low_transfer",
+                  config: {
+                    ...config,
+                    maxBusTransfers: Math.max(0, Math.min(config.maxBusTransfers, 2)),
+                  },
+                },
+                {
+                  id: "exploratory_bounded_walk",
+                  config: {
+                    ...config,
+                    maxWalkingDistanceM: Math.max(250, Math.round(config.maxWalkingDistanceM * 0.85)),
+                    maxTotalWalkingDistanceM: Math.max(
+                      Math.max(250, Math.round(config.maxWalkingDistanceM * 0.85)),
+                      Math.round(config.maxTotalWalkingDistanceM * 0.90),
+                    ),
+                  },
+                },
+              ];
+
+              for (const exploratory of exploratoryCandidates) {
+                if (alternatives.length >= 4) {
+                  break;
+                }
+
+                try {
+                  const exploratoryResult = await routingWorkerClient.route(
+                    {
+                      from: body.from,
+                      to: body.to,
+                      graph: snapshot,
+                      routeMetrics,
+                      config: exploratory.config,
+                      walkingMode: "dynamic",
+                    },
+                    { timeoutMs: Math.max(2000, Math.floor(workerTimeoutMs * 0.4)) },
+                  );
+
+                  const normalizedResult = normalizeRouteResultForSchema(exploratoryResult, body.from, body.to);
+                  normalizedResult.routeLabel = `Alternative (${exploratory.id.replace("exploratory_", "").replace(/_/g, " ")})`;
+                  normalizedResult.profileId = exploratory.id;
+
+                  const fingerprint = routeFingerprint(normalizedResult);
+                  if (seenFingerprints.has(fingerprint)) {
+                    continue;
+                  }
+
+                  if (!isMeaningfullyDifferentRoute(normalizedResult, alternatives)) {
+                    continue;
+                  }
+
+                  seenFingerprints.add(fingerprint);
+                  alternatives.push(normalizedResult);
+                } catch {
+                  // Keep quick-route responsive; exploratory candidates are best-effort
+                }
+              }
+            }
+
+            return {
+              ...alternatives[0],
+              routes: alternatives,
+              primaryRouteIndex: 0,
+              alternatives: alternatives.slice(1),
+              primaryAlternativeIndex: 0,
+            };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             const isTimeout = /timed out/i.test(message);
+            const isNoRoute = /No route found|search budget exceeded/i.test(message);
             return reply.code(isTimeout ? 504 : 500).send({
               error: isTimeout
                 ? "Routing timed out while searching for a path"
-                : "Routing failed while searching for a path",
+                : isNoRoute
+                  ? "No feasible route found under current constraints"
+                  : "Routing failed while searching for a path",
               details: message,
             });
           }
