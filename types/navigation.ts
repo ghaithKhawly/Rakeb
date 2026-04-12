@@ -113,6 +113,11 @@ export type RoutingWorkerPayload = {
   routeMetrics: RouteLiveMetricForRouting[];
   config: EffectiveRoutingConfig;
   walkingMode?: "dynamic" | "precomputed"; // internal: not exposed to clients
+  relaxation?: {
+    allowStartAnchorOverCap?: boolean;
+    allowEndAnchorOverCap?: boolean;
+    requireBusSegment?: boolean;
+  };
 };
 
 export type RouteCostBreakdown = {
@@ -149,6 +154,13 @@ export type NavigationRouteResult = {
   etaSeconds: number;
   segments: RouteSegment[];
   bestEffort: boolean;
+  routeLabel?: string;
+  profileId?: string;
+  routes?: NavigationRouteResult[];
+  primaryRouteIndex?: number;
+  // Backward compatibility for legacy clients.
+  alternatives?: NavigationRouteResult[];
+  primaryAlternativeIndex?: number;
   // usedConfig is the server-client parity contract for routing formulas/constants.
   usedConfig: EffectiveRoutingConfig;
 };

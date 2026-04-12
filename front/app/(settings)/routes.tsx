@@ -14,7 +14,8 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import MapView, { Polyline, Region } from "react-native-maps";
+import MapView, { Polyline } from "@/components/maps/MapViewCompat";
+import type { Region } from "@/components/maps/MapViewCompat";
 import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
 import * as Location from "expo-location";
@@ -208,7 +209,7 @@ function findNearestRouteName(
 
 export default function RoutesMapScreen() {
   const router = useRouter();
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
   const {
     data: graphStatus,
     isLoading: graphLoading,
