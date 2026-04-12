@@ -524,7 +524,12 @@ export default function HomeScreen() {
           ))}
         </MapView>
 
-        <View style={styles.sheet}>
+        <View
+          style={[
+            styles.sheet,
+            routeResult && styles.sheetExpanded,
+          ]}
+        >
           <ThemedText type="defaultSemiBold" style={styles.title}>
             Route Planner
           </ThemedText>
@@ -681,6 +686,7 @@ export default function HomeScreen() {
 
               <ScrollView
                 style={styles.stepsWrap}
+                contentContainerStyle={styles.stepsContent}
                 showsVerticalScrollIndicator={false}
               >
                 {selectedRoute?.segments.map((segment, index) => (
@@ -763,6 +769,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     gap: 8,
+  },
+  sheetExpanded: {
+    maxHeight: "76%",
   },
   title: {
     color: Colors.dark.text,
@@ -859,7 +868,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   stepsWrap: {
+    flex: 1,
     marginTop: 4,
+  },
+  stepsContent: {
+    paddingBottom: 10,
   },
   stepCard: {
     borderRadius: 10,
@@ -896,7 +909,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   alternativesContainer: {
-    marginTop: 10,
+    marginTop: 8,
     marginBottom: 4,
   },
   alternativesLabel: {
@@ -910,16 +923,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   alternativesContent: {
-    gap: 8,
+    gap: 6,
   },
   alternativeCard: {
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.dark.border,
     backgroundColor: Colors.dark.background,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minWidth: 118,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 104,
   },
   alternativeCardActive: {
     borderColor: Colors.dark.primary,
