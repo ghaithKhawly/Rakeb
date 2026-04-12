@@ -9,7 +9,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline, Region } from "react-native-maps";
+import MapView, { Marker, Polyline } from "@/components/maps/MapViewCompat";
+import type { Region } from "@/components/maps/MapViewCompat";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -250,7 +251,7 @@ function extractApiErrorMessage(error: unknown): string {
 }
 
 export default function HomeScreen() {
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
   const routingPreferencesQuery = useRoutingPreferences();
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
@@ -622,19 +623,6 @@ export default function HomeScreen() {
 
           {routeResult ? (
             <>
-              <View style={styles.routeLabelRow}>
-                <ThemedText type="defaultSemiBold" style={styles.routeLabel}>
-                  {selectedRoute?.routeLabel || "Best Route"}
-                </ThemedText>
-                {selectedRoute?.bestEffort ? (
-                  <View style={styles.bestEffortBadge}>
-                    <ThemedText style={styles.bestEffortBadgeText}>
-                      Best-Effort
-                    </ThemedText>
-                  </View>
-                ) : null}
-              </View>
-
               <View style={styles.summaryRow}>
                 <ThemedText style={styles.summaryText}>
                   ETA: {Math.max(1, Math.round((selectedRoute?.etaSeconds ?? 0) / 60))}{" "}
@@ -734,18 +722,6 @@ export default function HomeScreen() {
                       >
                         <ThemedText style={styles.pointBadgeText}>
                           {segment.to.label ?? pointName(index + 1)}
-                        </ThemedText>
-                      </View>
-                    </View>
-                    <View style={styles.stepMetaRow}>
-                      <View
-                        style={[
-                          styles.modePill,
-                          segment.mode === "walk" ? styles.walkPill : styles.busPill,
-                        ]}
-                      >
-                        <ThemedText style={styles.modePillText}>
-                          {segment.mode === "walk" ? "Walk" : "Bus"}
                         </ThemedText>
                       </View>
                     </View>
@@ -899,26 +875,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 6,
   },
-  stepMetaRow: {
-    flexDirection: "row",
-    marginBottom: 4,
-  },
-  modePill: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  walkPill: {
-    backgroundColor: "#FFF3E6",
-  },
-  busPill: {
-    backgroundColor: "#E8EDFF",
-  },
-  modePillText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: Colors.dark.icon,
-  },
   pointBadge: {
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -938,17 +894,6 @@ const styles = StyleSheet.create({
     color: Colors.dark.icon,
     fontSize: 12,
     marginTop: 4,
-  },
-  routeLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  routeLabel: {
-    color: Colors.dark.primary,
-    fontSize: 14,
   },
   alternativesContainer: {
     marginTop: 10,
@@ -996,18 +941,5 @@ const styles = StyleSheet.create({
   },
   altCardMetricActive: {
     color: Colors.dark.text,
-  },
-  bestEffortBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: "#FFF8E6",
-    borderWidth: 1,
-    borderColor: "#E7D39C",
-  },
-  bestEffortBadgeText: {
-    color: "#8A6116",
-    fontSize: 10,
-    fontWeight: "700",
   },
 });
