@@ -3,6 +3,9 @@ import { isAxiosError } from "axios";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -18,12 +21,19 @@ import type { LocationDTO } from "../../../types/location";
 import type {
   NavigationRouteRequestBody,
   NavigationRouteResult,
-  RouteSegment,
+  ParseNavigationTextResponse,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
-import { useRoutingPreferences } from "@/hooks/useBusApi";
+import { MapSearchControl } from "@/components/MapSearchControl";
+import { RouteFeedbackPanel } from "@/components/home/RouteFeedbackPanel";
+import { RoutePlannerControls } from "@/components/home/RoutePlannerControls";
+import { RouteStepsList } from "@/components/home/RouteStepsList";
+import {
+  useParseNavigationTextMutation,
+  useRoutingPreferences,
+} from "@/hooks/useBusApi";
 
 const INITIAL_REGION: Region = {
   latitude: 33.5138,
@@ -250,9 +260,45 @@ function extractApiErrorMessage(error: unknown): string {
   return "Failed to compute route.";
 }
 
+function isNavigationRouteResult(
+  value: unknown,
+): value is NavigationRouteResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as { segments?: unknown; etaSeconds?: unknown };
+  return (
+    Array.isArray(candidate.segments) &&
+    typeof candidate.etaSeconds === "number"
+  );
+}
+
+function buildNaturalRouteFallbackMessage(
+  response: ParseNavigationTextResponse,
+): string {
+  if (response.message && response.message.trim().length > 0) {
+    return response.message;
+  }
+
+  switch (response.reason) {
+    case "feature_disabled":
+      return "Text route parsing is currently disabled on the server (NLP_ENABLED is off).";
+    case "parse_failed":
+      return "Could not parse that request. Try clearer start/destination names or choose points on the map.";
+    case "unknown_landmark":
+      return "Could not recognize one of the places. Try another wording or pick points on the map.";
+    case "empty_or_invalid_input":
+      return "Please enter a route request first.";
+    default:
+      return "Could not parse your text request. Please pick points on the map.";
+  }
+}
+
 export default function HomeScreen() {
   const mapRef = useRef<any>(null);
   const routingPreferencesQuery = useRoutingPreferences();
+  const parseNavigationTextMutation = useParseNavigationTextMutation();
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
     null,
@@ -266,6 +312,8 @@ export default function HomeScreen() {
     "start" | "destination"
   >("destination");
   const [isRouting, setIsRouting] = useState(false);
+  const [isSearchingPlace, setIsSearchingPlace] = useState(false);
+  const [naturalRouteText, setNaturalRouteText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const selectedRoute = useMemo(
@@ -379,6 +427,57 @@ export default function HomeScreen() {
     }, {});
   }, [routePoints]);
 
+  const requestRouteForPoints = async (
+    from: LocationDTO,
+    to: LocationDTO,
+  ): Promise<NavigationRouteResult> => {
+    const savedPrefs = routingPreferencesQuery.data;
+
+    const payload: NavigationRouteRequestBody = {
+      from,
+      to,
+      ...(savedPrefs
+        ? {
+            preferences: savedPrefs.preferences,
+            options: savedPrefs.options,
+          }
+        : {}),
+    };
+
+    if (__DEV__) {
+      console.log("[Route] request payload", payload);
+    }
+
+    const response = await api.post<NavigationRouteResult>(
+      "/api/busses/navigation/route",
+      payload,
+    );
+
+    if (__DEV__) {
+      console.log("[Route] response summary", {
+        walkingDistanceM: response.data.walkingDistanceM,
+        transferCount: response.data.transferCount,
+        usedConfig: response.data.usedConfig,
+      });
+    }
+
+    return response.data;
+  };
+
+  const applyRouteToMap = (result: NavigationRouteResult) => {
+    const coords = result.segments.flatMap((segment) => [
+      { latitude: segment.from.lat, longitude: segment.from.lng },
+      { latitude: segment.to.lat, longitude: segment.to.lng },
+    ]);
+
+    if (coords.length >= 2) {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 80, right: 40, bottom: 220, left: 40 },
+        animated: true,
+      });
+    }
+  };
+
   const requestRoute = async () => {
     if (!currentLocation || !destination) {
       Alert.alert(
@@ -393,46 +492,9 @@ export default function HomeScreen() {
     setSelectedAlternativeIndex(0);
 
     try {
-      const savedPrefs = routingPreferencesQuery.data;
-
-      const payload: NavigationRouteRequestBody = {
-        from: currentLocation,
-        to: destination,
-        ...(savedPrefs
-          ? {
-              preferences: savedPrefs.preferences,
-              options: savedPrefs.options,
-            }
-          : {}),
-      };
-
-      if (__DEV__) {
-        console.log("[Route] request payload", payload);
-      }
-
-      const response = await api.post<NavigationRouteResult>(
-        "/api/busses/navigation/route",
-        payload,
-      );
-
-      setRouteResult(response.data);
-
-      if (__DEV__) {
-        console.log("[Route] response summary", {
-          walkingDistanceM: response.data.walkingDistanceM,
-          transferCount: response.data.transferCount,
-          usedConfig: response.data.usedConfig,
-        });
-      }
-
-      const coords = response.data.segments.flatMap((segment) => toMapCoordinates(segment));
-
-      if (coords.length >= 2) {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 80, right: 40, bottom: 220, left: 40 },
-          animated: true,
-        });
-      }
+      const result = await requestRouteForPoints(currentLocation, destination);
+      setRouteResult(result);
+      applyRouteToMap(result);
     } catch (err) {
       const message = extractApiErrorMessage(err);
       setError(message);
@@ -443,8 +505,93 @@ export default function HomeScreen() {
     }
   };
 
+  const handleNaturalAction = async (response: ParseNavigationTextResponse) => {
+    switch (response.action) {
+      case "preview_points": {
+        if (!response.from || !response.to) {
+          setError("NLP response did not include valid route points.");
+          return;
+        }
+
+        setCurrentLocation(response.from);
+        setDestination(response.to);
+        setMapSelectionMode("destination");
+        setError(null);
+
+        const result = await requestRouteForPoints(response.from, response.to);
+        setRouteResult(result);
+        applyRouteToMap(result);
+        setNaturalRouteText("");
+        return;
+      }
+      case "route_result": {
+        if (!isNavigationRouteResult(response.route)) {
+          setError("NLP route result was returned in an unsupported format.");
+          return;
+        }
+
+        setCurrentLocation(response.route.from);
+        setDestination(response.route.to);
+        setRouteResult(response.route);
+        setError(null);
+        applyRouteToMap(response.route);
+        setNaturalRouteText("");
+        return;
+      }
+      case "ask_clarification": {
+        const message =
+          response.question ?? "Please clarify your route request.";
+        setError(message);
+        Alert.alert("Clarification needed", message);
+        return;
+      }
+      case "not_a_trip_request":
+      case "show_map_picker": {
+        const message = buildNaturalRouteFallbackMessage(response);
+        setError(message);
+        Alert.alert("Text route", message);
+        return;
+      }
+      case "show_route_info": {
+        Alert.alert(
+          "Route info",
+          "This request returned route information only. Use map points to compute a trip.",
+        );
+        return;
+      }
+      default: {
+        setError("Unexpected NLP response action.");
+      }
+    }
+  };
+
+  const submitNaturalRouteText = async () => {
+    const text = naturalRouteText.trim();
+    if (!text) {
+      Alert.alert("Missing text", "Type a route request first.");
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const response = await parseNavigationTextMutation.mutateAsync({
+        text,
+      });
+      await handleNaturalAction(response);
+    } catch (err) {
+      const message = extractApiErrorMessage(err);
+      setError(message);
+      Alert.alert("Text route failed", message);
+    }
+  };
+
   const clearRoute = () => {
     setRouteResult(null);
+    setCurrentLocation(null);
+    setDestination(null);
+    setNaturalRouteText("");
+    setMapSelectionMode("destination");
     setError(null);
     setSelectedAlternativeIndex(0);
   };
@@ -458,6 +605,7 @@ export default function HomeScreen() {
           initialRegion={INITIAL_REGION}
           showsUserLocation
           onPress={(event) => {
+            Keyboard.dismiss();
             if (routeResult) {
               return;
             }
@@ -524,225 +672,87 @@ export default function HomeScreen() {
           ))}
         </MapView>
 
-        <View
-          style={[
-            styles.sheet,
-            routeResult && styles.sheetExpanded,
-          ]}
+        <MapSearchControl
+          topInset={topOverlayInset}
+          isSearching={isSearchingPlace}
+          onSearch={searchPlace}
+        />
+
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoiding}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={
+            Platform.OS === "ios" ? insets.bottom + 12 : 20
+          }
+          pointerEvents="box-none"
         >
-          <ThemedText type="defaultSemiBold" style={styles.title}>
-            Route Planner
-          </ThemedText>
-
-          <ThemedText style={styles.prefStatusText}>
-            {routingPreferencesQuery.isLoading
-              ? "Loading saved preferences..."
-              : routingPreferencesQuery.data
-                ? "Using saved preferences"
-                : "Using server defaults"}
-          </ThemedText>
-
-          <ThemedText style={styles.metaText}>
-            Start: {currentLocation?.label ?? "Detecting current location..."}
-          </ThemedText>
-          <ThemedText style={styles.metaText}>
-            Destination: {destination?.label ?? "Tap map to select destination"}
-          </ThemedText>
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mapSelectionMode === "start" && styles.modeButtonActive,
-              ]}
-              onPress={() => setMapSelectionMode("start")}
+          <View
+            style={[styles.sheet, isSheetCollapsed && styles.sheetCollapsed]}
+          >
+            <ScrollView
+              ref={sheetScrollRef}
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={!isSheetCollapsed}
             >
-              <ThemedText
-                style={[
-                  styles.modeButtonText,
-                  mapSelectionMode === "start" && styles.modeButtonTextActive,
-                ]}
-              >
-                Tap Map: Set Start
-              </ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mapSelectionMode === "destination" && styles.modeButtonActive,
-              ]}
-              onPress={() => setMapSelectionMode("destination")}
-            >
-              <ThemedText
-                style={[
-                  styles.modeButtonText,
-                  mapSelectionMode === "destination" &&
-                    styles.modeButtonTextActive,
-                ]}
-              >
-                Tap Map: Set Destination
-              </ThemedText>
-            </TouchableOpacity>
-          </View>
-          {routeResult ? (
-            <ThemedText style={styles.metaText}>
-              Route is locked. Press Clear to choose a new destination.
-            </ThemedText>
-          ) : null}
+              <RoutePlannerControls
+                isCollapsed={isSheetCollapsed}
+                onToggleCollapsed={() => setIsSheetCollapsed((prev) => !prev)}
+                isPreferencesLoading={routingPreferencesQuery.isLoading}
+                hasSavedPreferences={Boolean(routingPreferencesQuery.data)}
+                startLabel={
+                  currentLocation?.label ?? "Detecting current location..."
+                }
+                destinationLabel={
+                  destination?.label ?? "Tap map to select destination"
+                }
+                mapSelectionMode={mapSelectionMode}
+                onChangeMapSelectionMode={setMapSelectionMode}
+                routeLocked={Boolean(routeResult)}
+                onRequestRoute={() => void requestRoute()}
+                isRouting={isRouting}
+                naturalRouteText={naturalRouteText}
+                onChangeNaturalRouteText={setNaturalRouteText}
+                onSubmitNaturalRouteText={() => void submitNaturalRouteText()}
+                isParsingNaturalRoute={parseNavigationTextMutation.isPending}
+                onClearRoute={clearRoute}
+                errorMessage={error}
+              />
 
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => void requestRoute()}
-              disabled={isRouting}
-            >
-              {isRouting ? (
-                <ActivityIndicator
-                  size="small"
-                  color={Colors.dark.background}
-                />
-              ) : (
+              {routeResult && !isSheetCollapsed ? (
                 <>
-                  <Ionicons
-                    name="navigate"
-                    size={16}
-                    color={Colors.dark.background}
-                  />
-                  <ThemedText style={styles.primaryButtonText}>
-                    Request Route
-                  </ThemedText>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={clearRoute}
-            >
-              <ThemedText style={styles.secondaryButtonText}>Clear</ThemedText>
-            </TouchableOpacity>
-          </View>
-
-          {error ? (
-            <ThemedText style={styles.errorText}>{error}</ThemedText>
-          ) : null}
-
-          {routeResult ? (
-            <>
-              <View style={styles.summaryRow}>
-                <ThemedText style={styles.summaryText}>
-                  ETA: {Math.max(1, Math.round((selectedRoute?.etaSeconds ?? 0) / 60))}{" "}
-                  min
-                </ThemedText>
-                <ThemedText style={styles.summaryText}>
-                  Walk: {Math.round(selectedRoute?.walkingDistanceM ?? 0)}m
-                </ThemedText>
-              </View>
-
-              {routeChoices.length > 1 ? (
-                <View style={styles.alternativesContainer}>
-                  <ThemedText style={styles.alternativesLabel}>
-                    Route Options
-                  </ThemedText>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.alternativesScroll}
-                    contentContainerStyle={styles.alternativesContent}
-                  >
-                    {routeChoices.map((option, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.alternativeCard,
-                          selectedAlternativeIndex === idx &&
-                            styles.alternativeCardActive,
-                        ]}
-                        onPress={() => setSelectedAlternativeIndex(idx)}
-                      >
-                        <ThemedText
-                          style={[
-                            styles.altCardLabel,
-                            selectedAlternativeIndex === idx &&
-                              styles.altCardLabelActive,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {option.routeLabel || (idx === 0 ? "Best" : `Alt ${idx}`)}
-                        </ThemedText>
-                        <ThemedText
-                          style={[
-                            styles.altCardMetric,
-                            selectedAlternativeIndex === idx &&
-                              styles.altCardMetricActive,
-                          ]}
-                        >
-                          {Math.max(1, Math.round(option.etaSeconds / 60))} min
-                        </ThemedText>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-
-              <ScrollView
-                style={styles.stepsWrap}
-                contentContainerStyle={styles.stepsContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {selectedRoute?.segments.map((segment, index) => (
-                  <View
-                    key={`${segment.mode}-${index}`}
-                    style={styles.stepCard}
-                  >
-                    <View style={styles.stepPointsRow}>
-                      <View
-                        style={[
-                          styles.pointBadge,
-                          {
-                            backgroundColor:
-                              pointColorByLabel[
-                                segment.from.label ?? pointName(index)
-                              ] ?? Colors.dark.primary,
-                          },
-                        ]}
-                      >
-                        <ThemedText style={styles.pointBadgeText}>
-                          {segment.from.label ?? pointName(index)}
-                        </ThemedText>
-                      </View>
-                      <Ionicons
-                        name="arrow-forward"
-                        size={14}
-                        color={Colors.dark.icon}
-                      />
-                      <View
-                        style={[
-                          styles.pointBadge,
-                          {
-                            backgroundColor:
-                              pointColorByLabel[
-                                segment.to.label ?? pointName(index + 1)
-                              ] ?? Colors.dark.primary,
-                          },
-                        ]}
-                      >
-                        <ThemedText style={styles.pointBadgeText}>
-                          {segment.to.label ?? pointName(index + 1)}
-                        </ThemedText>
-                      </View>
-                    </View>
-                    <ThemedText style={styles.stepTitle}>
-                      {stepTitle(segment)}
+                  <View style={styles.summaryRow}>
+                    <ThemedText style={styles.summaryText}>
+                      ETA:{" "}
+                      {Math.max(1, Math.round(routeResult.etaSeconds / 60))} min
                     </ThemedText>
-                    <ThemedText style={styles.stepSubtitle}>
-                      {stepDetails(segment, index)}
+                    <ThemedText style={styles.summaryText}>
+                      Transfers: {routeResult.transferCount}
+                    </ThemedText>
+                    <ThemedText style={styles.summaryText}>
+                      Walk: {Math.round(routeResult.walkingDistanceM)}m
                     </ThemedText>
                   </View>
-                )) ?? null}
-              </ScrollView>
-            </>
-          ) : null}
-        </View>
+
+                  <RouteFeedbackPanel
+                    routeResult={routeResult}
+                    onOpen={() => {
+                      sheetScrollRef.current?.scrollToEnd({ animated: true });
+                    }}
+                  />
+
+                  <RouteStepsList
+                    routeResult={routeResult}
+                    pointColorByLabel={pointColorByLabel}
+                  />
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </SafeAreaView>
   );
@@ -756,6 +766,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.dark.background,
+  },
+  keyboardAvoiding: {
+    ...StyleSheet.absoluteFillObject,
   },
   sheet: {
     position: "absolute",

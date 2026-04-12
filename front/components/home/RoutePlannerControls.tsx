@@ -2,6 +2,7 @@ import React from "react";
 import {
   ActivityIndicator,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,6 +23,10 @@ type RoutePlannerControlsProps = {
   routeLocked: boolean;
   onRequestRoute: () => void;
   isRouting: boolean;
+  naturalRouteText: string;
+  onChangeNaturalRouteText: (value: string) => void;
+  onSubmitNaturalRouteText: () => void;
+  isParsingNaturalRoute: boolean;
   onClearRoute: () => void;
   errorMessage: string | null;
 };
@@ -38,6 +43,10 @@ export function RoutePlannerControls({
   routeLocked,
   onRequestRoute,
   isRouting,
+  naturalRouteText,
+  onChangeNaturalRouteText,
+  onSubmitNaturalRouteText,
+  isParsingNaturalRoute,
   onClearRoute,
   errorMessage,
 }: RoutePlannerControlsProps) {
@@ -119,7 +128,7 @@ export function RoutePlannerControls({
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={onRequestRoute}
-              disabled={isRouting}
+              disabled={isRouting || isParsingNaturalRoute}
             >
               {isRouting ? (
                 <ActivityIndicator
@@ -145,6 +154,41 @@ export function RoutePlannerControls({
               onPress={onClearRoute}
             >
               <ThemedText style={styles.secondaryButtonText}>Clear</ThemedText>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.textRouteRow}>
+            <TextInput
+              value={naturalRouteText}
+              onChangeText={onChangeNaturalRouteText}
+              placeholder="Try: from Bab Touma to Hamra / من باب توما إلى الحمراء"
+              placeholderTextColor="#6B7280"
+              style={styles.textRouteInput}
+              editable={!isParsingNaturalRoute && !isRouting}
+              returnKeyType="send"
+              blurOnSubmit
+              onSubmitEditing={onSubmitNaturalRouteText}
+              autoCapitalize="none"
+              autoCorrect={false}
+              selectionColor={Colors.dark.primary}
+              cursorColor={Colors.dark.primary}
+              textAlign="left"
+            />
+            <TouchableOpacity
+              style={styles.textRouteButton}
+              onPress={onSubmitNaturalRouteText}
+              disabled={isParsingNaturalRoute || isRouting}
+            >
+              {isParsingNaturalRoute ? (
+                <ActivityIndicator
+                  size="small"
+                  color={Colors.dark.background}
+                />
+              ) : (
+                <ThemedText style={styles.textRouteButtonText}>
+                  Use Text
+                </ThemedText>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -248,6 +292,35 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     fontSize: 13,
     fontWeight: "600",
+  },
+  textRouteRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 2,
+  },
+  textRouteInput: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#9CA3AF",
+    paddingHorizontal: 12,
+    backgroundColor: "#FFFFFF",
+    color: "#111827",
+    fontSize: 14,
+  },
+  textRouteButton: {
+    width: 94,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: Colors.dark.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  textRouteButtonText: {
+    color: Colors.dark.background,
+    fontSize: 12,
+    fontWeight: "700",
   },
   errorText: {
     color: "#F87171",

@@ -23,6 +23,26 @@ export type NavigationRouteRequestBody = {
   options?: RoutingOptions;
 };
 
+export type ParseNavigationTextRequestBody = {
+  text: string;
+  traceId?: string;
+  conversationId?: string;
+};
+
+export type ParseNavigationTextResponse = {
+  action: string;
+  traceId: string;
+  conversation_id?: string;
+  message?: string;
+  question?: string;
+  reason?: string;
+  from?: LocationDTO & { landmark_id?: string };
+  to?: LocationDTO & { landmark_id?: string };
+  route?: unknown;
+  data?: unknown;
+  [key: string]: unknown;
+};
+
 export type RoutingGraphRoute = {
   id: number;
   name: string;

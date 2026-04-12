@@ -20,6 +20,7 @@ import {
   getUserTravelHistory,
   increaseBusPricesByTenPercent,
   invalidateGraphCache,
+  parseNavigationText,
   setRoutingPreferences,
   submitBusFeedback,
 } from "@/services/busApi";
@@ -37,7 +38,10 @@ import type {
   SetRoutingPreferencesBody,
   SubmitBusFeedbackBody,
 } from "@types/bus";
-import type { NavigationRouteRequestBody } from "@types/navigation";
+import type {
+  NavigationRouteRequestBody,
+  ParseNavigationTextRequestBody,
+} from "@types/navigation";
 
 export const busApiKeys = {
   all: ["busApi"] as const,
@@ -116,6 +120,12 @@ export function useComputeNavigationRouteMutation() {
     onSuccess: async () => {
       await invalidate(queryClient, [...busApiKeys.all, "travelHistory"]);
     },
+  });
+}
+
+export function useParseNavigationTextMutation() {
+  return useMutation({
+    mutationFn: (body: ParseNavigationTextRequestBody) => parseNavigationText(body),
   });
 }
 

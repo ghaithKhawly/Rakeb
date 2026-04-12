@@ -6,6 +6,7 @@ export default function TabLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="routes" />
       <Stack.Screen name="preferences" />
+      <Stack.Screen name="history" />
     </Stack>
   );
 }
