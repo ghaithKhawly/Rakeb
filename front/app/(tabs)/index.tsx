@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
 import {
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -15,6 +18,7 @@ import type { LocationDTO } from "../../../types/location";
 import type {
   NavigationRouteRequestBody,
   NavigationRouteResult,
+  ParseNavigationTextResponse,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
 import { Colors } from "@/constants/theme";
@@ -23,7 +27,10 @@ import { MapSearchControl } from "@/components/MapSearchControl";
 import { RouteFeedbackPanel } from "@/components/home/RouteFeedbackPanel";
 import { RoutePlannerControls } from "@/components/home/RoutePlannerControls";
 import { RouteStepsList } from "@/components/home/RouteStepsList";
-import { useRoutingPreferences } from "@/hooks/useBusApi";
+import {
+  useParseNavigationTextMutation,
+  useRoutingPreferences,
+} from "@/hooks/useBusApi";
 
 const INITIAL_REGION: Region = {
   latitude: 33.5138,
@@ -121,6 +128,41 @@ function extractApiErrorMessage(error: unknown): string {
   return "Failed to compute route.";
 }
 
+function isNavigationRouteResult(
+  value: unknown,
+): value is NavigationRouteResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as { segments?: unknown; etaSeconds?: unknown };
+  return (
+    Array.isArray(candidate.segments) &&
+    typeof candidate.etaSeconds === "number"
+  );
+}
+
+function buildNaturalRouteFallbackMessage(
+  response: ParseNavigationTextResponse,
+): string {
+  if (response.message && response.message.trim().length > 0) {
+    return response.message;
+  }
+
+  switch (response.reason) {
+    case "feature_disabled":
+      return "Text route parsing is currently disabled on the server (NLP_ENABLED is off).";
+    case "parse_failed":
+      return "Could not parse that request. Try clearer start/destination names or choose points on the map.";
+    case "unknown_landmark":
+      return "Could not recognize one of the places. Try another wording or pick points on the map.";
+    case "empty_or_invalid_input":
+      return "Please enter a route request first.";
+    default:
+      return "Could not parse your text request. Please pick points on the map.";
+  }
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const topOverlayInset = Math.max(insets.top, 10) + 8;
@@ -128,6 +170,7 @@ export default function HomeScreen() {
   const mapRef = useRef<MapView>(null);
   const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
+  const parseNavigationTextMutation = useParseNavigationTextMutation();
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
     null,
@@ -141,6 +184,7 @@ export default function HomeScreen() {
   >("destination");
   const [isRouting, setIsRouting] = useState(false);
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
+  const [naturalRouteText, setNaturalRouteText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
 
@@ -241,6 +285,57 @@ export default function HomeScreen() {
     }, {});
   }, [routePoints]);
 
+  const requestRouteForPoints = async (
+    from: LocationDTO,
+    to: LocationDTO,
+  ): Promise<NavigationRouteResult> => {
+    const savedPrefs = routingPreferencesQuery.data;
+
+    const payload: NavigationRouteRequestBody = {
+      from,
+      to,
+      ...(savedPrefs
+        ? {
+            preferences: savedPrefs.preferences,
+            options: savedPrefs.options,
+          }
+        : {}),
+    };
+
+    if (__DEV__) {
+      console.log("[Route] request payload", payload);
+    }
+
+    const response = await api.post<NavigationRouteResult>(
+      "/api/busses/navigation/route",
+      payload,
+    );
+
+    if (__DEV__) {
+      console.log("[Route] response summary", {
+        walkingDistanceM: response.data.walkingDistanceM,
+        transferCount: response.data.transferCount,
+        usedConfig: response.data.usedConfig,
+      });
+    }
+
+    return response.data;
+  };
+
+  const applyRouteToMap = (result: NavigationRouteResult) => {
+    const coords = result.segments.flatMap((segment) => [
+      { latitude: segment.from.lat, longitude: segment.from.lng },
+      { latitude: segment.to.lat, longitude: segment.to.lng },
+    ]);
+
+    if (coords.length >= 2) {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 80, right: 40, bottom: 220, left: 40 },
+        animated: true,
+      });
+    }
+  };
+
   const requestRoute = async () => {
     if (!currentLocation || !destination) {
       Alert.alert(
@@ -254,49 +349,9 @@ export default function HomeScreen() {
     setError(null);
 
     try {
-      const savedPrefs = routingPreferencesQuery.data;
-
-      const payload: NavigationRouteRequestBody = {
-        from: currentLocation,
-        to: destination,
-        ...(savedPrefs
-          ? {
-              preferences: savedPrefs.preferences,
-              options: savedPrefs.options,
-            }
-          : {}),
-      };
-
-      if (__DEV__) {
-        console.log("[Route] request payload", payload);
-      }
-
-      const response = await api.post<NavigationRouteResult>(
-        "/api/busses/navigation/route",
-        payload,
-      );
-
-      setRouteResult(response.data);
-
-      if (__DEV__) {
-        console.log("[Route] response summary", {
-          walkingDistanceM: response.data.walkingDistanceM,
-          transferCount: response.data.transferCount,
-          usedConfig: response.data.usedConfig,
-        });
-      }
-
-      const coords = response.data.segments.flatMap((segment) => [
-        { latitude: segment.from.lat, longitude: segment.from.lng },
-        { latitude: segment.to.lat, longitude: segment.to.lng },
-      ]);
-
-      if (coords.length >= 2) {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 80, right: 40, bottom: 220, left: 40 },
-          animated: true,
-        });
-      }
+      const result = await requestRouteForPoints(currentLocation, destination);
+      setRouteResult(result);
+      applyRouteToMap(result);
     } catch (err) {
       const message = extractApiErrorMessage(err);
       setError(message);
@@ -307,8 +362,93 @@ export default function HomeScreen() {
     }
   };
 
+  const handleNaturalAction = async (response: ParseNavigationTextResponse) => {
+    switch (response.action) {
+      case "preview_points": {
+        if (!response.from || !response.to) {
+          setError("NLP response did not include valid route points.");
+          return;
+        }
+
+        setCurrentLocation(response.from);
+        setDestination(response.to);
+        setMapSelectionMode("destination");
+        setError(null);
+
+        const result = await requestRouteForPoints(response.from, response.to);
+        setRouteResult(result);
+        applyRouteToMap(result);
+        setNaturalRouteText("");
+        return;
+      }
+      case "route_result": {
+        if (!isNavigationRouteResult(response.route)) {
+          setError("NLP route result was returned in an unsupported format.");
+          return;
+        }
+
+        setCurrentLocation(response.route.from);
+        setDestination(response.route.to);
+        setRouteResult(response.route);
+        setError(null);
+        applyRouteToMap(response.route);
+        setNaturalRouteText("");
+        return;
+      }
+      case "ask_clarification": {
+        const message =
+          response.question ?? "Please clarify your route request.";
+        setError(message);
+        Alert.alert("Clarification needed", message);
+        return;
+      }
+      case "not_a_trip_request":
+      case "show_map_picker": {
+        const message = buildNaturalRouteFallbackMessage(response);
+        setError(message);
+        Alert.alert("Text route", message);
+        return;
+      }
+      case "show_route_info": {
+        Alert.alert(
+          "Route info",
+          "This request returned route information only. Use map points to compute a trip.",
+        );
+        return;
+      }
+      default: {
+        setError("Unexpected NLP response action.");
+      }
+    }
+  };
+
+  const submitNaturalRouteText = async () => {
+    const text = naturalRouteText.trim();
+    if (!text) {
+      Alert.alert("Missing text", "Type a route request first.");
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const response = await parseNavigationTextMutation.mutateAsync({
+        text,
+      });
+      await handleNaturalAction(response);
+    } catch (err) {
+      const message = extractApiErrorMessage(err);
+      setError(message);
+      Alert.alert("Text route failed", message);
+    }
+  };
+
   const clearRoute = () => {
     setRouteResult(null);
+    setCurrentLocation(null);
+    setDestination(null);
+    setNaturalRouteText("");
+    setMapSelectionMode("destination");
     setError(null);
   };
 
@@ -363,6 +503,7 @@ export default function HomeScreen() {
           showsUserLocation
           mapPadding={{ top: topMapControlInset, right: 0, bottom: 0, left: 0 }}
           onPress={(event) => {
+            Keyboard.dismiss();
             if (routeResult) {
               return;
             }
@@ -435,65 +576,81 @@ export default function HomeScreen() {
           onSearch={searchPlace}
         />
 
-        <View style={[styles.sheet, isSheetCollapsed && styles.sheetCollapsed]}>
-          <ScrollView
-            ref={sheetScrollRef}
-            style={styles.sheetScroll}
-            contentContainerStyle={styles.sheetContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!isSheetCollapsed}
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoiding}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={
+            Platform.OS === "ios" ? insets.bottom + 12 : 20
+          }
+          pointerEvents="box-none"
+        >
+          <View
+            style={[styles.sheet, isSheetCollapsed && styles.sheetCollapsed]}
           >
-            <RoutePlannerControls
-              isCollapsed={isSheetCollapsed}
-              onToggleCollapsed={() => setIsSheetCollapsed((prev) => !prev)}
-              isPreferencesLoading={routingPreferencesQuery.isLoading}
-              hasSavedPreferences={Boolean(routingPreferencesQuery.data)}
-              startLabel={
-                currentLocation?.label ?? "Detecting current location..."
-              }
-              destinationLabel={
-                destination?.label ?? "Tap map to select destination"
-              }
-              mapSelectionMode={mapSelectionMode}
-              onChangeMapSelectionMode={setMapSelectionMode}
-              routeLocked={Boolean(routeResult)}
-              onRequestRoute={() => void requestRoute()}
-              isRouting={isRouting}
-              onClearRoute={clearRoute}
-              errorMessage={error}
-            />
+            <ScrollView
+              ref={sheetScrollRef}
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={!isSheetCollapsed}
+            >
+              <RoutePlannerControls
+                isCollapsed={isSheetCollapsed}
+                onToggleCollapsed={() => setIsSheetCollapsed((prev) => !prev)}
+                isPreferencesLoading={routingPreferencesQuery.isLoading}
+                hasSavedPreferences={Boolean(routingPreferencesQuery.data)}
+                startLabel={
+                  currentLocation?.label ?? "Detecting current location..."
+                }
+                destinationLabel={
+                  destination?.label ?? "Tap map to select destination"
+                }
+                mapSelectionMode={mapSelectionMode}
+                onChangeMapSelectionMode={setMapSelectionMode}
+                routeLocked={Boolean(routeResult)}
+                onRequestRoute={() => void requestRoute()}
+                isRouting={isRouting}
+                naturalRouteText={naturalRouteText}
+                onChangeNaturalRouteText={setNaturalRouteText}
+                onSubmitNaturalRouteText={() => void submitNaturalRouteText()}
+                isParsingNaturalRoute={parseNavigationTextMutation.isPending}
+                onClearRoute={clearRoute}
+                errorMessage={error}
+              />
 
-            {routeResult && !isSheetCollapsed ? (
-              <>
-                <View style={styles.summaryRow}>
-                  <ThemedText style={styles.summaryText}>
-                    ETA: {Math.max(1, Math.round(routeResult.etaSeconds / 60))}{" "}
-                    min
-                  </ThemedText>
-                  <ThemedText style={styles.summaryText}>
-                    Transfers: {routeResult.transferCount}
-                  </ThemedText>
-                  <ThemedText style={styles.summaryText}>
-                    Walk: {Math.round(routeResult.walkingDistanceM)}m
-                  </ThemedText>
-                </View>
+              {routeResult && !isSheetCollapsed ? (
+                <>
+                  <View style={styles.summaryRow}>
+                    <ThemedText style={styles.summaryText}>
+                      ETA:{" "}
+                      {Math.max(1, Math.round(routeResult.etaSeconds / 60))} min
+                    </ThemedText>
+                    <ThemedText style={styles.summaryText}>
+                      Transfers: {routeResult.transferCount}
+                    </ThemedText>
+                    <ThemedText style={styles.summaryText}>
+                      Walk: {Math.round(routeResult.walkingDistanceM)}m
+                    </ThemedText>
+                  </View>
 
-                <RouteFeedbackPanel
-                  routeResult={routeResult}
-                  onOpen={() => {
-                    sheetScrollRef.current?.scrollToEnd({ animated: true });
-                  }}
-                />
+                  <RouteFeedbackPanel
+                    routeResult={routeResult}
+                    onOpen={() => {
+                      sheetScrollRef.current?.scrollToEnd({ animated: true });
+                    }}
+                  />
 
-                <RouteStepsList
-                  routeResult={routeResult}
-                  pointColorByLabel={pointColorByLabel}
-                />
-              </>
-            ) : null}
-          </ScrollView>
-        </View>
+                  <RouteStepsList
+                    routeResult={routeResult}
+                    pointColorByLabel={pointColorByLabel}
+                  />
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </SafeAreaView>
   );
@@ -507,6 +664,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.dark.background,
+  },
+  keyboardAvoiding: {
+    ...StyleSheet.absoluteFillObject,
   },
   sheet: {
     position: "absolute",

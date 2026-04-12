@@ -91,6 +91,12 @@ export default function SettingsScreen() {
             subtitle="Customize routing factors"
             onPress={() => router.push("/(settings)/preferences" as never)}
           />
+          <SettingsCard
+            icon="time"
+            title="Travel History"
+            subtitle="See and manage your saved route history"
+            onPress={() => router.push("/(settings)/history" as never)}
+          />
         </View>
 
         <TouchableOpacity
