@@ -3,8 +3,11 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -29,19 +32,19 @@ type PreferenceState = Record<PreferenceKey, number>;
 type OptionState = Record<OptionKey, number>;
 
 const DEFAULT_PREFERENCES: PreferenceState = {
-  speed: 0,
-  crowding: 0,
-  price: 0,
-  transfer: 0,
-  walking: 0,
+  speed: 1,
+  crowding: 1,
+  price: 1,
+  transfer: 1,
+  walking: 1,
 };
 
 const DEFAULT_OPTIONS: OptionState = {
-  maxWalkingDistanceM: 50,
-  maxTotalWalkingDistanceM: 10000,
-  maxWalkingNeighbors: 100,
-  maxBusTransfers: 10,
-  walkingSpeedMps: 3.5,
+  maxWalkingDistanceM: 1000,
+  maxTotalWalkingDistanceM: 2000,
+  maxWalkingNeighbors: 12,
+  maxBusTransfers: 5,
+  walkingSpeedMps: 1.25,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -61,6 +64,8 @@ type OptionCardProps = {
   value: number;
   onChange: (value: number) => void;
   step: number;
+  hint?: string;
+  precision?: number;
 };
 
 function PreferenceCard({
@@ -70,6 +75,23 @@ function PreferenceCard({
   onChange,
   emphasis = "neutral",
 }: PreferenceCardProps) {
+  const normalizedValue = Number.isFinite(value) ? value : 0;
+  const [draft, setDraft] = useState(normalizedValue.toFixed(2));
+
+  useEffect(() => {
+    setDraft(normalizedValue.toFixed(2));
+  }, [normalizedValue]);
+
+  const commitDraft = () => {
+    const parsed = Number(draft.replace(",", ".").trim());
+    if (!Number.isFinite(parsed)) {
+      setDraft(normalizedValue.toFixed(2));
+      return;
+    }
+
+    onChange(parsed);
+  };
+
   return (
     <View
       style={[
@@ -91,26 +113,36 @@ function PreferenceCard({
             }
           />
         </View>
-        <ThemedText style={styles.preferenceValue}>{value}</ThemedText>
+        <ThemedText style={styles.preferenceValue}>
+          {normalizedValue.toFixed(2)}
+        </ThemedText>
       </View>
       <ThemedText style={styles.preferenceLabel}>{label}</ThemedText>
-      <View style={styles.sliderControl}>
+      <View style={styles.preferenceAdjustRow}>
         <TouchableOpacity
           style={styles.stepButton}
-          onPress={() => onChange(value - 5)}
+          onPress={() => onChange(normalizedValue - 0.1)}
           activeOpacity={0.85}
         >
           <Ionicons name="remove" size={16} color={Kinetic.primary} />
         </TouchableOpacity>
-        <View style={styles.sliderTrackWrap}>
-          <View style={styles.sliderTrackRow}>
-            <View style={[styles.sliderProgress, { flex: value }]} />
-            <View style={[styles.sliderRemain, { flex: 100 - value }]} />
-          </View>
-        </View>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          onBlur={commitDraft}
+          onSubmitEditing={commitDraft}
+          keyboardType="decimal-pad"
+          returnKeyType="done"
+          blurOnSubmit
+          style={styles.numericInput}
+          textAlign="center"
+          selectionColor={Kinetic.primary}
+          placeholder="0.00"
+          placeholderTextColor={Kinetic.onSurfaceVariant}
+        />
         <TouchableOpacity
           style={styles.stepButton}
-          onPress={() => onChange(value + 5)}
+          onPress={() => onChange(normalizedValue + 0.1)}
           activeOpacity={0.85}
         >
           <Ionicons name="add" size={16} color={Kinetic.primary} />
@@ -120,10 +152,34 @@ function PreferenceCard({
   );
 }
 
-function OptionCard({ label, value, onChange, step }: OptionCardProps) {
+function OptionCard({
+  label,
+  value,
+  onChange,
+  step,
+  hint,
+  precision = 0,
+}: OptionCardProps) {
+  const [draft, setDraft] = useState(value.toFixed(precision));
+
+  useEffect(() => {
+    setDraft(value.toFixed(precision));
+  }, [precision, value]);
+
+  const commitDraft = () => {
+    const parsed = Number(draft.replace(",", ".").trim());
+    if (!Number.isFinite(parsed)) {
+      setDraft(value.toFixed(precision));
+      return;
+    }
+
+    onChange(parsed);
+  };
+
   return (
     <View style={styles.optionCard}>
       <ThemedText style={styles.optionLabel}>{label}</ThemedText>
+      {hint ? <ThemedText style={styles.optionHint}>{hint}</ThemedText> : null}
       <View style={styles.optionValueRow}>
         <TouchableOpacity
           style={styles.optionStepButton}
@@ -132,7 +188,19 @@ function OptionCard({ label, value, onChange, step }: OptionCardProps) {
         >
           <Ionicons name="remove" size={16} color={Kinetic.primary} />
         </TouchableOpacity>
-        <ThemedText style={styles.optionValue}>{value}</ThemedText>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          onBlur={commitDraft}
+          onSubmitEditing={commitDraft}
+          keyboardType={precision > 0 ? "decimal-pad" : "number-pad"}
+          returnKeyType="done"
+          blurOnSubmit
+          style={styles.numericInput}
+          textAlign="center"
+          selectionColor={Kinetic.primary}
+          placeholderTextColor={Kinetic.onSurfaceVariant}
+        />
         <TouchableOpacity
           style={styles.optionStepButton}
           onPress={() => onChange(value + step)}
@@ -163,11 +231,11 @@ export default function PreferencesScreen() {
     }
 
     setPreferences({
-      speed: Math.round(data.preferences.speed * 100),
-      crowding: Math.round(data.preferences.crowding * 100),
-      price: Math.round(data.preferences.price * 100),
-      transfer: Math.round(data.preferences.transfer * 100),
-      walking: Math.round(data.preferences.walking * 100),
+      speed: Number(data.preferences.speed.toFixed(2)),
+      crowding: Number(data.preferences.crowding.toFixed(2)),
+      price: Number(data.preferences.price.toFixed(2)),
+      transfer: Number(data.preferences.transfer.toFixed(2)),
+      walking: Number(data.preferences.walking.toFixed(2)),
     });
 
     setOptions({
@@ -182,28 +250,54 @@ export default function PreferencesScreen() {
   const updatePreference = (key: PreferenceKey) => (value: number) => {
     setPreferences((prev) => ({
       ...prev,
-      [key]: clamp(Math.round(value), 0, 100),
+      [key]: Math.max(0, Number(value.toFixed(2))),
     }));
   };
 
   const updateOption = (key: OptionKey) => (value: number) => {
-    const next = (() => {
+    setOptions((prev) => {
       if (key === "maxWalkingDistanceM") {
-        return clamp(Math.round(value), 50, 2000);
+        const maxWalkingDistanceM = Math.max(50, Math.round(value));
+        return {
+          ...prev,
+          maxWalkingDistanceM,
+          maxTotalWalkingDistanceM: Math.max(
+            prev.maxTotalWalkingDistanceM,
+            maxWalkingDistanceM,
+          ),
+        };
       }
-      if (key === "maxTotalWalkingDistanceM") {
-        return clamp(Math.round(value), 0, 10000);
-      }
-      if (key === "maxWalkingNeighbors") {
-        return clamp(Math.round(value), 1, 100);
-      }
-      if (key === "maxBusTransfers") {
-        return clamp(Math.round(value), 0, 10);
-      }
-      return clamp(Number(value.toFixed(1)), 0.4, 3.5);
-    })();
 
-    setOptions((prev) => ({ ...prev, [key]: next }));
+      if (key === "maxTotalWalkingDistanceM") {
+        const maxTotalWalkingDistanceM = clamp(Math.round(value), 0, 10000);
+        return {
+          ...prev,
+          maxTotalWalkingDistanceM: Math.max(
+            maxTotalWalkingDistanceM,
+            prev.maxWalkingDistanceM,
+          ),
+        };
+      }
+
+      if (key === "maxWalkingNeighbors") {
+        return {
+          ...prev,
+          maxWalkingNeighbors: clamp(Math.round(value), 1, 100),
+        };
+      }
+
+      if (key === "maxBusTransfers") {
+        return {
+          ...prev,
+          maxBusTransfers: clamp(Math.round(value), 0, 10),
+        };
+      }
+
+      return {
+        ...prev,
+        walkingSpeedMps: clamp(Number(value.toFixed(1)), 0.4, 3.5),
+      };
+    });
   };
 
   const applyPreferences = async () => {
@@ -242,130 +336,146 @@ export default function PreferencesScreen() {
 
   return (
     <View style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: Math.max(insets.top, 10) + 12,
-            paddingBottom: Math.max(insets.bottom, 20) + 20,
-          },
-        ]}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoiding}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.bottom + 12 : 20}
       >
-        <View style={styles.topBar}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            activeOpacity={0.85}
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={21} color={Kinetic.primary} />
-          </TouchableOpacity>
-          <ThemedText style={styles.topTitle}>Preferences</ThemedText>
-        </View>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingTop: Math.max(insets.top, 10) + 12,
+              paddingBottom: Math.max(insets.bottom, 20) + 20,
+            },
+          ]}
+        >
+          <View style={styles.topBar}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              activeOpacity={0.85}
+              style={styles.backButton}
+            >
+              <Ionicons name="arrow-back" size={21} color={Kinetic.primary} />
+            </TouchableOpacity>
+            <ThemedText style={styles.topTitle}>Preferences</ThemedText>
+          </View>
 
-        <View style={styles.heroBlock}>
-          <ThemedText style={styles.heroLabel}>Customization</ThemedText>
-          <ThemedText style={styles.heroTitle}>Routing Preferences</ThemedText>
-          <ThemedText style={styles.heroSubtitle}>
-            Adjust and save weights/options used by routing.
-          </ThemedText>
-        </View>
-
-        {isLoading ? (
-          <View style={styles.loadingState}>
-            <ActivityIndicator size="small" color={Kinetic.primary} />
-            <ThemedText style={styles.loadingText}>
-              Loading saved values...
+          <View style={styles.heroBlock}>
+            <ThemedText style={styles.heroLabel}>Customization</ThemedText>
+            <ThemedText style={styles.heroTitle}>
+              Routing Preferences
+            </ThemedText>
+            <ThemedText style={styles.heroSubtitle}>
+              Adjust and save weights/options used by routing.
             </ThemedText>
           </View>
-        ) : null}
 
-        <PreferenceCard
-          icon="flash"
-          label="Speed"
-          value={preferences.speed}
-          onChange={updatePreference("speed")}
-          emphasis="primary"
-        />
-        <PreferenceCard
-          icon="people"
-          label="Avoid Crowds"
-          value={preferences.crowding}
-          onChange={updatePreference("crowding")}
-        />
-        <PreferenceCard
-          icon="card"
-          label="Price Sensitivity"
-          value={preferences.price}
-          onChange={updatePreference("price")}
-          emphasis="primary"
-        />
-        <PreferenceCard
-          icon="git-branch"
-          label="Fewer Transfers"
-          value={preferences.transfer}
-          onChange={updatePreference("transfer")}
-        />
-        <PreferenceCard
-          icon="walk"
-          label="Walking"
-          value={preferences.walking}
-          onChange={updatePreference("walking")}
-          emphasis="primary"
-        />
+          {isLoading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="small" color={Kinetic.primary} />
+              <ThemedText style={styles.loadingText}>
+                Loading saved values...
+              </ThemedText>
+            </View>
+          ) : null}
 
-        <ThemedText style={styles.sectionLabel}>Routing Options</ThemedText>
-        <OptionCard
-          label="Max Walking Distance (m)"
-          value={options.maxWalkingDistanceM}
-          onChange={updateOption("maxWalkingDistanceM")}
-          step={50}
-        />
-        <OptionCard
-          label="Max Total Walking Distance (m)"
-          value={options.maxTotalWalkingDistanceM}
-          onChange={updateOption("maxTotalWalkingDistanceM")}
-          step={100}
-        />
-        <OptionCard
-          label="Max Walking Neighbors"
-          value={options.maxWalkingNeighbors}
-          onChange={updateOption("maxWalkingNeighbors")}
-          step={1}
-        />
-        <OptionCard
-          label="Max Bus Transfers"
-          value={options.maxBusTransfers}
-          onChange={updateOption("maxBusTransfers")}
-          step={1}
-        />
-        <OptionCard
-          label="Walking Speed (m/s)"
-          value={options.walkingSpeedMps}
-          onChange={updateOption("walkingSpeedMps")}
-          step={0.1}
-        />
+          <PreferenceCard
+            icon="flash"
+            label="Speed"
+            value={preferences.speed}
+            onChange={updatePreference("speed")}
+            emphasis="primary"
+          />
+          <PreferenceCard
+            icon="people"
+            label="Avoid Crowds"
+            value={preferences.crowding}
+            onChange={updatePreference("crowding")}
+          />
+          <PreferenceCard
+            icon="card"
+            label="Price Sensitivity"
+            value={preferences.price}
+            onChange={updatePreference("price")}
+            emphasis="primary"
+          />
+          <PreferenceCard
+            icon="git-branch"
+            label="Fewer Transfers"
+            value={preferences.transfer}
+            onChange={updatePreference("transfer")}
+          />
+          <PreferenceCard
+            icon="walk"
+            label="Walking"
+            value={preferences.walking}
+            onChange={updatePreference("walking")}
+            emphasis="primary"
+          />
 
-        {setRoutingPreferencesMutation.isError ? (
-          <ThemedText style={styles.errorText}>
-            Could not save preferences.
-          </ThemedText>
-        ) : null}
+          <ThemedText style={styles.sectionLabel}>Routing Options</ThemedText>
+          <OptionCard
+            label="Max Walking Distance (m)"
+            value={options.maxWalkingDistanceM}
+            onChange={updateOption("maxWalkingDistanceM")}
+            step={50}
+            hint="min 50"
+          />
+          <OptionCard
+            label="Max Total Walking Distance (m)"
+            value={options.maxTotalWalkingDistanceM}
+            onChange={updateOption("maxTotalWalkingDistanceM")}
+            step={100}
+            hint="range 0 .. 10000"
+          />
+          <OptionCard
+            label="Max Walking Neighbors"
+            value={options.maxWalkingNeighbors}
+            onChange={updateOption("maxWalkingNeighbors")}
+            step={1}
+            hint="range 1 .. 100"
+          />
+          <OptionCard
+            label="Max Bus Transfers"
+            value={options.maxBusTransfers}
+            onChange={updateOption("maxBusTransfers")}
+            step={1}
+            hint="range 0 .. 10"
+          />
+          <OptionCard
+            label="Walking Speed (m/s)"
+            value={options.walkingSpeedMps}
+            onChange={updateOption("walkingSpeedMps")}
+            step={0.1}
+            hint="range 0.4 .. 3.5"
+            precision={1}
+          />
 
-        <TouchableOpacity
-          style={[styles.applyButton, isSaving && styles.applyButtonDisabled]}
-          onPress={() => void applyPreferences()}
-          activeOpacity={0.9}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <ThemedText style={styles.applyButtonText}>
-              Save Preferences
+          {setRoutingPreferencesMutation.isError ? (
+            <ThemedText style={styles.errorText}>
+              Could not save preferences.
             </ThemedText>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
+          ) : null}
+
+          <TouchableOpacity
+            style={[styles.applyButton, isSaving && styles.applyButtonDisabled]}
+            onPress={() => void applyPreferences()}
+            activeOpacity={0.9}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <ThemedText style={styles.applyButtonText}>
+                Save Preferences
+              </ThemedText>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -374,6 +484,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Kinetic.surfaceLow,
+  },
+  keyboardAvoiding: {
+    flex: 1,
   },
   content: {
     paddingHorizontal: 22,
@@ -469,10 +582,11 @@ const styles = StyleSheet.create({
     color: Kinetic.onSurfaceVariant,
     fontWeight: "700",
   },
-  sliderControl: {
+  preferenceAdjustRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "space-between",
+    gap: 12,
   },
   stepButton: {
     width: 28,
@@ -481,25 +595,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-  },
-  sliderTrackWrap: {
-    flex: 1,
-    justifyContent: "center",
-    height: 28,
-  },
-  sliderTrackRow: {
-    flexDirection: "row",
-    height: 8,
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  sliderProgress: {
-    height: 8,
-    backgroundColor: "rgba(0, 62, 199, 0.25)",
-  },
-  sliderRemain: {
-    height: 8,
-    backgroundColor: Kinetic.surfaceContainer,
   },
   sectionLabel: {
     textTransform: "uppercase",
@@ -521,6 +616,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
+  optionHint: {
+    color: Kinetic.onSurfaceVariant,
+    fontSize: 11,
+    fontWeight: "600",
+  },
   optionValueRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -538,6 +638,22 @@ const styles = StyleSheet.create({
     color: Kinetic.onSurface,
     fontSize: 16,
     fontWeight: "800",
+  },
+  numericInput: {
+    minWidth: 96,
+    height: 36,
+    lineHeight: 18,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Kinetic.outlineVariant,
+    backgroundColor: "#FFFFFF",
+    color: Kinetic.onSurface,
+    fontSize: 15,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
   errorText: {
     color: "#BA1A1A",
