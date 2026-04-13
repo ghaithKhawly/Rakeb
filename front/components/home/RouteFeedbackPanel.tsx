@@ -15,6 +15,7 @@ import {
   useBusFeedbackSummary,
   useSubmitBusFeedbackMutation,
 } from "@/hooks/useBusApi";
+import { useLanguage } from "@/hooks/LanguageContext";
 
 type RouteFeedbackPanelProps = {
   routeResult: NavigationRouteResult;
@@ -36,6 +37,7 @@ export function RouteFeedbackPanel({
   routeResult,
   onOpen,
 }: RouteFeedbackPanelProps) {
+  const { t } = useLanguage();
   const submitFeedbackMutation = useSubmitBusFeedbackMutation();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -55,7 +57,9 @@ export function RouteFeedbackPanel({
       )
       .map((segment) => ({
         routeId: segment.routeId as number,
-        routeName: segment.routeName ?? `Route ${segment.routeId as number}`,
+        routeName:
+          segment.routeName ??
+          `${t("steps.routeFallback")} ${segment.routeId as number}`,
       }))
       .filter((route) => {
         if (seen.has(route.routeId)) {
@@ -64,7 +68,7 @@ export function RouteFeedbackPanel({
         seen.add(route.routeId);
         return true;
       });
-  }, [routeResult]);
+  }, [routeResult, t]);
 
   const activeRouteId = selectedRouteId ?? feedbackRoutes[0]?.routeId;
   const summaryQuery = useBusFeedbackSummary(activeRouteId, 30);
@@ -102,7 +106,10 @@ export function RouteFeedbackPanel({
 
   const submit = async () => {
     if (!selectedRouteId) {
-      Alert.alert("Missing route", "Select a bus route to submit feedback.");
+      Alert.alert(
+        t("feedback.missingRouteTitle"),
+        t("feedback.missingRouteBody"),
+      );
       return;
     }
 
@@ -113,7 +120,10 @@ export function RouteFeedbackPanel({
       parsedPrice != null &&
       (!Number.isFinite(parsedPrice) || parsedPrice < 0)
     ) {
-      Alert.alert("Invalid price", "Reported price must be 0 or greater.");
+      Alert.alert(
+        t("feedback.invalidPriceTitle"),
+        t("feedback.invalidPriceBody"),
+      );
       return;
     }
 
@@ -126,7 +136,7 @@ export function RouteFeedbackPanel({
       comment: comment.trim().length > 0 ? comment.trim() : undefined,
     });
 
-    Alert.alert("Thanks", "Feedback submitted successfully.");
+    Alert.alert(t("feedback.thanks"), t("feedback.submitted"));
     setIsOpen(false);
     setReportedPrice("");
     setCrowdingLevel(3);
@@ -138,21 +148,25 @@ export function RouteFeedbackPanel({
   return (
     <View style={styles.feedbackWrap}>
       <View style={styles.feedbackHeaderRow}>
-        <ThemedText style={styles.feedbackTitle}>Route Feedback</ThemedText>
+        <ThemedText style={styles.feedbackTitle}>
+          {t("feedback.title")}
+        </ThemedText>
         <TouchableOpacity
           style={styles.feedbackToggleButton}
           onPress={toggleOpen}
           disabled={submitFeedbackMutation.isPending}
         >
           <ThemedText style={styles.feedbackToggleButtonText} numberOfLines={1}>
-            {isOpen ? "Hide" : "Give Feedback"}
+            {isOpen ? t("feedback.hide") : t("feedback.give")}
           </ThemedText>
         </TouchableOpacity>
       </View>
 
       {isOpen ? (
         <View style={styles.feedbackForm}>
-          <ThemedText style={styles.feedbackLabel}>Route</ThemedText>
+          <ThemedText style={styles.feedbackLabel}>
+            {t("feedback.route")}
+          </ThemedText>
           <View style={styles.feedbackRouteRow}>
             {feedbackRoutes.map((route) => (
               <TouchableOpacity
@@ -179,50 +193,56 @@ export function RouteFeedbackPanel({
 
           <View style={styles.feedbackSummaryBox}>
             <ThemedText style={styles.feedbackSummaryTitle}>
-              Route Feedback Summary (30 days)
+              {t("feedback.summary")}
             </ThemedText>
             {summaryQuery.isLoading ? (
               <ThemedText style={styles.feedbackSummaryText}>
-                Loading summary...
+                {t("feedback.loadingSummary")}
               </ThemedText>
             ) : summaryQuery.data ? (
               <>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Reports: {summaryQuery.data.reportsCount}
+                  {t("feedback.reports")}: {summaryQuery.data.reportsCount}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Avg Price: {formatMetric(summaryQuery.data.avgPrice, 2)}
+                  {t("feedback.avgPrice")}:{" "}
+                  {formatMetric(summaryQuery.data.avgPrice, 2)}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Avg Crowding:{" "}
+                  {t("feedback.avgCrowding")}:{" "}
                   {formatMetric(summaryQuery.data.avgCrowdingLevel)}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Avg Speed: {formatMetric(summaryQuery.data.avgSpeedLevel)}
+                  {t("feedback.avgSpeed")}:{" "}
+                  {formatMetric(summaryQuery.data.avgSpeedLevel)}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Avg Slowness:{" "}
+                  {t("feedback.avgSlowness")}:{" "}
                   {formatMetric(summaryQuery.data.avgSlownessLevel)}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Crowding Tendency: {summaryQuery.data.crowdingTendency ?? "-"}
+                  {t("feedback.crowdingTendency")}:{" "}
+                  {summaryQuery.data.crowdingTendency ?? "-"}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Speed Suggestion:{" "}
+                  {t("feedback.speedSuggestion")}:{" "}
                   {formatMetric(summaryQuery.data.speedMultiplierSuggestion, 2)}
                 </ThemedText>
                 <ThemedText style={styles.feedbackSummaryText}>
-                  Last Report: {summaryQuery.data.lastReportAt ?? "-"}
+                  {t("feedback.lastReport")}:{" "}
+                  {summaryQuery.data.lastReportAt ?? "-"}
                 </ThemedText>
               </>
             ) : (
               <ThemedText style={styles.feedbackSummaryText}>
-                No summary available yet.
+                {t("feedback.noSummary")}
               </ThemedText>
             )}
           </View>
 
-          <ThemedText style={styles.feedbackLabel}>Reported Price</ThemedText>
+          <ThemedText style={styles.feedbackLabel}>
+            {t("feedback.reportedPrice")}
+          </ThemedText>
           <TextInput
             value={reportedPrice}
             onChangeText={setReportedPrice}
@@ -232,7 +252,9 @@ export function RouteFeedbackPanel({
             style={styles.feedbackInput}
           />
 
-          <ThemedText style={styles.feedbackLabel}>Crowding Level</ThemedText>
+          <ThemedText style={styles.feedbackLabel}>
+            {t("feedback.crowdingLevel")}
+          </ThemedText>
           <View style={styles.levelRow}>
             {[1, 2, 3, 4, 5].map((level) => (
               <TouchableOpacity
@@ -255,7 +277,9 @@ export function RouteFeedbackPanel({
             ))}
           </View>
 
-          <ThemedText style={styles.feedbackLabel}>Speed Level</ThemedText>
+          <ThemedText style={styles.feedbackLabel}>
+            {t("feedback.speedLevel")}
+          </ThemedText>
           <View style={styles.levelRow}>
             {[1, 2, 3, 4, 5].map((level) => (
               <TouchableOpacity
@@ -278,7 +302,9 @@ export function RouteFeedbackPanel({
             ))}
           </View>
 
-          <ThemedText style={styles.feedbackLabel}>Slowness Level</ThemedText>
+          <ThemedText style={styles.feedbackLabel}>
+            {t("feedback.slownessLevel")}
+          </ThemedText>
           <View style={styles.levelRow}>
             {[1, 2, 3, 4, 5].map((level) => (
               <TouchableOpacity
@@ -302,12 +328,12 @@ export function RouteFeedbackPanel({
           </View>
 
           <ThemedText style={styles.feedbackLabel}>
-            Comment (Optional)
+            {t("feedback.comment")}
           </ThemedText>
           <TextInput
             value={comment}
             onChangeText={setComment}
-            placeholder="Share your experience"
+            placeholder={t("feedback.commentPlaceholder")}
             placeholderTextColor={Colors.dark.icon}
             style={[styles.feedbackInput, styles.feedbackCommentInput]}
             multiline
@@ -320,7 +346,9 @@ export function RouteFeedbackPanel({
               onPress={() => setIsOpen(false)}
               disabled={submitFeedbackMutation.isPending}
             >
-              <ThemedText style={styles.feedbackSkipText}>Skip</ThemedText>
+              <ThemedText style={styles.feedbackSkipText}>
+                {t("feedback.skip")}
+              </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.feedbackSubmitButton}
@@ -334,7 +362,7 @@ export function RouteFeedbackPanel({
                 />
               ) : (
                 <ThemedText style={styles.feedbackSubmitText}>
-                  Submit Feedback
+                  {t("feedback.submit")}
                 </ThemedText>
               )}
             </TouchableOpacity>

@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { useLanguage } from "@/hooks/LanguageContext";
 
 type RoutePlannerControlsProps = {
   isCollapsed: boolean;
@@ -50,11 +51,13 @@ export function RoutePlannerControls({
   onClearRoute,
   errorMessage,
 }: RoutePlannerControlsProps) {
+  const { isRTL, t } = useLanguage();
+
   return (
     <>
       <View style={styles.sheetHeaderRow}>
         <ThemedText type="defaultSemiBold" style={styles.title}>
-          Route Planner
+          {t("planner.title")}
         </ThemedText>
         <TouchableOpacity
           style={styles.sheetToggleButton}
@@ -70,17 +73,19 @@ export function RoutePlannerControls({
 
       <ThemedText style={styles.prefStatusText}>
         {isPreferencesLoading
-          ? "Loading saved preferences..."
+          ? t("planner.pref.loading")
           : hasSavedPreferences
-            ? "Using saved preferences"
-            : "Using server defaults"}
+            ? t("planner.pref.saved")
+            : t("planner.pref.defaults")}
       </ThemedText>
 
       {!isCollapsed ? (
         <>
-          <ThemedText style={styles.metaText}>Start: {startLabel}</ThemedText>
+          <ThemedText style={[styles.metaText, isRTL && styles.textRtl]}>
+            {t("planner.start")}: {startLabel}
+          </ThemedText>
           <ThemedText style={styles.metaText}>
-            Destination: {destinationLabel}
+            {t("planner.destination")}: {destinationLabel}
           </ThemedText>
           <View style={styles.modeRow}>
             <TouchableOpacity
@@ -96,7 +101,7 @@ export function RoutePlannerControls({
                   mapSelectionMode === "start" && styles.modeButtonTextActive,
                 ]}
               >
-                Tap Map: Set Start
+                {t("planner.tapStart")}
               </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity
@@ -113,14 +118,14 @@ export function RoutePlannerControls({
                     styles.modeButtonTextActive,
                 ]}
               >
-                Tap Map: Set Destination
+                {t("planner.tapDestination")}
               </ThemedText>
             </TouchableOpacity>
           </View>
 
           {routeLocked ? (
             <ThemedText style={styles.metaText}>
-              Route is locked. Press Clear to choose a new destination.
+              {t("planner.locked")}
             </ThemedText>
           ) : null}
 
@@ -143,7 +148,7 @@ export function RoutePlannerControls({
                     color={Colors.dark.background}
                   />
                   <ThemedText style={styles.primaryButtonText}>
-                    Request Route
+                    {t("planner.request")}
                   </ThemedText>
                 </>
               )}
@@ -153,7 +158,9 @@ export function RoutePlannerControls({
               style={styles.secondaryButton}
               onPress={onClearRoute}
             >
-              <ThemedText style={styles.secondaryButtonText}>Clear</ThemedText>
+              <ThemedText style={styles.secondaryButtonText}>
+                {t("planner.clear")}
+              </ThemedText>
             </TouchableOpacity>
           </View>
 
@@ -161,7 +168,7 @@ export function RoutePlannerControls({
             <TextInput
               value={naturalRouteText}
               onChangeText={onChangeNaturalRouteText}
-              placeholder="Try: from Bab Touma to Hamra / من باب توما إلى الحمراء"
+              placeholder={t("planner.textPlaceholder")}
               placeholderTextColor="#6B7280"
               style={styles.textRouteInput}
               editable={!isParsingNaturalRoute && !isRouting}
@@ -186,7 +193,7 @@ export function RoutePlannerControls({
                 />
               ) : (
                 <ThemedText style={styles.textRouteButtonText}>
-                  Use Text
+                  {t("planner.useText")}
                 </ThemedText>
               )}
             </TouchableOpacity>
@@ -224,6 +231,9 @@ const styles = StyleSheet.create({
   metaText: {
     color: Colors.dark.icon,
     fontSize: 12,
+  },
+  textRtl: {
+    textAlign: "right",
   },
   prefStatusText: {
     color: Colors.dark.primary,

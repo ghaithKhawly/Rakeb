@@ -12,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { Colors } from "@/constants/theme";
+import { useLanguage } from "@/hooks/LanguageContext";
 
 type MapSearchControlProps = {
   topInset: number;
@@ -24,6 +25,7 @@ export function MapSearchControl({
   isSearching,
   onSearch,
 }: MapSearchControlProps) {
+  const { isRTL, t } = useLanguage();
   const searchInputRef = useRef<TextInput>(null);
   const searchAnim = useRef(new Animated.Value(0)).current;
 
@@ -62,7 +64,13 @@ export function MapSearchControl({
   };
 
   return (
-    <View style={[styles.searchOverlay, { top: topInset }]}>
+    <View
+      style={[
+        styles.searchOverlay,
+        { top: topInset },
+        isRTL ? styles.searchOverlayRtl : styles.searchOverlayLtr,
+      ]}
+    >
       <TouchableOpacity
         style={styles.searchIconButton}
         onPress={toggleSearch}
@@ -88,7 +96,7 @@ export function MapSearchControl({
           ref={searchInputRef}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search place on map"
+          placeholder={t("search.placeholder")}
           placeholderTextColor={Colors.dark.icon}
           style={styles.searchInput}
           returnKeyType="search"
@@ -117,10 +125,16 @@ export function MapSearchControl({
 const styles = StyleSheet.create({
   searchOverlay: {
     position: "absolute",
-    left: 12,
     flexDirection: "row",
     alignItems: "center",
     zIndex: 20,
+  },
+  searchOverlayLtr: {
+    left: 12,
+  },
+  searchOverlayRtl: {
+    right: 12,
+    flexDirection: "row-reverse",
   },
   searchIconButton: {
     width: 40,

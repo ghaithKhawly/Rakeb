@@ -14,6 +14,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { QueryProvider } from "@/config/queryProvider";
 import { AuthProvider, useAuth } from "@/hooks/AuthContext";
 import { RoutePlanningProvider } from "@/hooks/RoutePlanningContext";
+import { LanguageProvider } from "@/hooks/LanguageContext";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -75,7 +76,9 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <RootLayoutNav />
+        <LanguageProvider>
+          <RootLayoutNav />
+        </LanguageProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

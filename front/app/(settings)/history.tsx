@@ -18,6 +18,8 @@ import {
   useUserTravelHistory,
 } from "@/hooks/useBusApi";
 import { useAuth } from "@/hooks/AuthContext";
+import { useLanguage } from "@/hooks/LanguageContext";
+import { SettingsTopBar } from "@/components/settings/SettingsTopBar";
 
 function formatDateTime(value: string | null): string {
   if (!value) {
@@ -50,6 +52,7 @@ export default function HistoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { isRTL, t } = useLanguage();
   const [statusMessage, setStatusMessage] = React.useState<{
     type: "success" | "error";
     text: string;
@@ -75,14 +78,18 @@ export default function HistoryScreen() {
 
   const items = historyQuery.data?.items ?? [];
 
+  const historySubtitle = t("history.subtitle")
+    .replace("{id}", String(user?.id ?? "-"))
+    .replace("{limit}", String(historyQuery.data?.limit ?? 20));
+
   const handleDelete = (id: number) => {
     Alert.alert(
-      "Delete Entry",
-      "Are you sure you want to remove this travel history item?",
+      t("history.deleteTitle"),
+      t("history.deleteBody"),
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete",
+          text: t("history.delete"),
           style: "destructive",
           onPress: () => {
             deleteHistoryMutation.mutate(
@@ -91,14 +98,14 @@ export default function HistoryScreen() {
                 onSuccess: () => {
                   setStatusMessage({
                     type: "success",
-                    text: "History entry deleted.",
+                    text: t("history.deleteSuccess"),
                   });
                 },
                 onError: (error) => {
                   const message =
                     error instanceof Error
                       ? error.message
-                      : "Could not delete history entry.";
+                      : t("history.deleteError");
                   setStatusMessage({
                     type: "error",
                     text: message,
@@ -113,7 +120,7 @@ export default function HistoryScreen() {
   };
 
   return (
-    <View style={styles.safeArea}>
+    <View style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -123,30 +130,22 @@ export default function HistoryScreen() {
           },
         ]}
       >
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            activeOpacity={0.85}
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={21} color={Kinetic.primary} />
-          </TouchableOpacity>
-
-          <View style={styles.headerCopy}>
-            <ThemedText style={styles.title}>Travel History</ThemedText>
-            <ThemedText style={styles.subtitle}>
-              User #{user?.id ?? "-"} - last {historyQuery.data?.limit ?? 20} trips
-            </ThemedText>
-          </View>
-
-          <TouchableOpacity
-            style={styles.refreshButton}
-            onPress={() => {
-              void historyQuery.refetch();
-            }}
-          >
-            <Ionicons name="refresh" size={18} color={Kinetic.primary} />
-          </TouchableOpacity>
+        <SettingsTopBar
+          title={t("history.title")}
+          onBack={() => router.back()}
+          rightSlot={(
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={() => {
+                void historyQuery.refetch();
+              }}
+            >
+              <Ionicons name="refresh" size={18} color={Kinetic.primary} />
+            </TouchableOpacity>
+          )}
+        />
+        <View style={styles.headerCopy}>
+          <ThemedText style={styles.subtitle}>{historySubtitle}</ThemedText>
         </View>
 
         {statusMessage ? (
@@ -182,21 +181,21 @@ export default function HistoryScreen() {
         {historyQuery.isLoading ? (
           <View style={styles.stateCard}>
             <ActivityIndicator size="small" color={Kinetic.primary} />
-            <ThemedText style={styles.stateText}>Loading history...</ThemedText>
+            <ThemedText style={styles.stateText}>{t("history.loading")}</ThemedText>
           </View>
         ) : null}
 
         {!historyQuery.isLoading && historyQuery.isError ? (
           <View style={styles.stateCard}>
             <ThemedText style={styles.errorText}>
-              Could not load travel history. Pull to retry or tap refresh.
+              {t("history.loadError")}
             </ThemedText>
           </View>
         ) : null}
 
         {!historyQuery.isLoading && !historyQuery.isError && items.length === 0 ? (
           <View style={styles.stateCard}>
-            <ThemedText style={styles.stateText}>No history entries yet.</ThemedText>
+            <ThemedText style={styles.stateText}>{t("history.empty")}</ThemedText>
           </View>
         ) : null}
 
@@ -206,10 +205,10 @@ export default function HistoryScreen() {
                 <View style={styles.entryTopRow}>
                   <View style={styles.routeCopy}>
                     <ThemedText style={styles.routeTitle}>
-                      {item.originLabel ?? "Unknown origin"} -> {item.destLabel ?? "Unknown destination"}
+                      {item.originLabel ?? t("history.unknownOrigin")} -> {item.destLabel ?? t("history.unknownDest")}
                     </ThemedText>
                     <ThemedText style={styles.routeTime}>
-                      {formatDateTime(item.traveledAt)}
+                      {item.traveledAt ? formatDateTime(item.traveledAt) : t("history.unknownTime")}
                     </ThemedText>
                   </View>
                   <TouchableOpacity
@@ -223,13 +222,13 @@ export default function HistoryScreen() {
 
                 <View style={styles.metaRow}>
                   <ThemedText style={styles.metaPill}>
-                    Transfers: {item.transferCount ?? 0}
+                    {t("history.metric.transfers")}: {item.transferCount ?? 0}
                   </ThemedText>
                   <ThemedText style={styles.metaPill}>
-                    Distance: {metersToKmText(item.totalDistanceM)}
+                    {t("history.metric.distance")}: {metersToKmText(item.totalDistanceM)}
                   </ThemedText>
                   <ThemedText style={styles.metaPill}>
-                    Duration: {durationToMinText(item.totalDurationSeconds)}
+                    {t("history.metric.duration")}: {durationToMinText(item.totalDurationSeconds)}
                   </ThemedText>
                 </View>
               </View>
@@ -245,36 +244,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Kinetic.surfaceLow,
   },
+  safeAreaRtl: {
+    direction: "rtl",
+  },
   content: {
     paddingHorizontal: 20,
     gap: 12,
   },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: Kinetic.outlineVariant,
-  },
   headerCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  title: {
-    color: Kinetic.onSurface,
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: "900",
-    letterSpacing: -0.8,
+    marginTop: -6,
+    marginBottom: 2,
   },
   subtitle: {
     color: Kinetic.onSurfaceVariant,

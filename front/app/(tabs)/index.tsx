@@ -33,6 +33,7 @@ import {
   useParseNavigationTextMutation,
   useRoutingPreferences,
 } from "@/hooks/useBusApi";
+import { useLanguage } from "@/hooks/LanguageContext";
 
 const INITIAL_REGION: Region = {
   latitude: 33.5138,
@@ -285,7 +286,9 @@ function buildNaturalRouteFallbackMessage(
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const { isRTL, t } = useLanguage();
   const topOverlayInset = Math.max(insets.top, 10) + 8;
+  const topMapControlInset = Math.max(topOverlayInset - 2, 0);
   const mapRef = useRef<any>(null);
   const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
@@ -317,7 +320,7 @@ export default function HomeScreen() {
     const detect = async () => {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted") {
-        setError("Location permission not granted.");
+        setError(t("home.error.locationPermission"));
         return;
       }
 
@@ -465,8 +468,8 @@ export default function HomeScreen() {
   const requestRoute = async () => {
     if (!currentLocation || !destination) {
       Alert.alert(
-        "Missing points",
-        "Current location and destination are required.",
+        t("home.error.missingPointsTitle"),
+        t("home.error.missingPointsBody"),
       );
       return;
     }
@@ -483,7 +486,7 @@ export default function HomeScreen() {
       const message = extractApiErrorMessage(err);
       setError(message);
       setRouteResult(null);
-      Alert.alert("Route request failed", message);
+      Alert.alert(t("home.error.routeFailedTitle"), message);
     } finally {
       setIsRouting(false);
     }
@@ -590,7 +593,10 @@ export default function HomeScreen() {
     try {
       const matches = await Location.geocodeAsync(searchText);
       if (matches.length === 0) {
-        Alert.alert("No place found", "Try a more specific place name.");
+        Alert.alert(
+          t("home.error.searchNoPlaceTitle"),
+          t("home.error.searchNoPlaceBody"),
+        );
         return;
       }
 
@@ -615,20 +621,24 @@ export default function HomeScreen() {
         350,
       );
     } catch {
-      Alert.alert("Search failed", "Could not search places right now.");
+      Alert.alert(
+        t("home.error.searchFailedTitle"),
+        t("home.error.searchFailedBody"),
+      );
     } finally {
       setIsSearchingPlace(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
       <View style={styles.container}>
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           initialRegion={INITIAL_REGION}
           showsUserLocation
+          mapPadding={{ top: topMapControlInset, right: 0, bottom: 0, left: 0 }}
           onPress={(event) => {
             Keyboard.dismiss();
             if (routeResult) {
@@ -751,14 +761,16 @@ export default function HomeScreen() {
                 <>
                   <View style={styles.summaryRow}>
                     <ThemedText style={styles.summaryText}>
-                      ETA:{" "}
-                      {Math.max(1, Math.round(routeResult.etaSeconds / 60))} min
+                      {t("route.eta")}:{" "}
+                      {Math.max(1, Math.round(routeResult.etaSeconds / 60))}{" "}
+                      {t("route.min")}
                     </ThemedText>
                     <ThemedText style={styles.summaryText}>
-                      Transfers: {routeResult.transferCount}
+                      {t("route.transfers")}: {routeResult.transferCount}
                     </ThemedText>
                     <ThemedText style={styles.summaryText}>
-                      Walk: {Math.round(routeResult.walkingDistanceM)}m
+                      {t("route.walk")}:{" "}
+                      {Math.round(routeResult.walkingDistanceM)}m
                     </ThemedText>
                   </View>
 
@@ -787,6 +799,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Colors.dark.background,
+  },
+  safeAreaRtl: {
+    direction: "rtl",
   },
   container: {
     flex: 1,

@@ -19,6 +19,8 @@ import {
   useRoutingPreferences,
   useSetRoutingPreferencesMutation,
 } from "@/hooks/useBusApi";
+import { useLanguage } from "@/hooks/LanguageContext";
+import { SettingsTopBar } from "@/components/settings/SettingsTopBar";
 
 type PreferenceKey = "speed" | "crowding" | "price" | "transfer" | "walking";
 type OptionKey =
@@ -216,6 +218,7 @@ function OptionCard({
 export default function PreferencesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isRTL, t } = useLanguage();
 
   const routingPreferencesQuery = useRoutingPreferences();
   const setRoutingPreferencesMutation = useSetRoutingPreferencesMutation();
@@ -335,7 +338,7 @@ export default function PreferencesScreen() {
   const isSaving = setRoutingPreferencesMutation.isPending;
 
   return (
-    <View style={styles.safeArea}>
+    <View style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoiding}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -352,24 +355,20 @@ export default function PreferencesScreen() {
             },
           ]}
         >
-          <View style={styles.topBar}>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              activeOpacity={0.85}
-              style={styles.backButton}
-            >
-              <Ionicons name="arrow-back" size={21} color={Kinetic.primary} />
-            </TouchableOpacity>
-            <ThemedText style={styles.topTitle}>Preferences</ThemedText>
-          </View>
+          <SettingsTopBar
+            title={t("preferences.title")}
+            onBack={() => router.back()}
+          />
 
           <View style={styles.heroBlock}>
-            <ThemedText style={styles.heroLabel}>Customization</ThemedText>
+            <ThemedText style={styles.heroLabel}>
+              {t("preferences.heroLabel")}
+            </ThemedText>
             <ThemedText style={styles.heroTitle}>
-              Routing Preferences
+              {t("preferences.heroTitle")}
             </ThemedText>
             <ThemedText style={styles.heroSubtitle}>
-              Adjust and save weights/options used by routing.
+              {t("preferences.heroSubtitle")}
             </ThemedText>
           </View>
 
@@ -377,86 +376,88 @@ export default function PreferencesScreen() {
             <View style={styles.loadingState}>
               <ActivityIndicator size="small" color={Kinetic.primary} />
               <ThemedText style={styles.loadingText}>
-                Loading saved values...
+                {t("preferences.loading")}
               </ThemedText>
             </View>
           ) : null}
 
           <PreferenceCard
             icon="flash"
-            label="Speed"
+            label={t("preferences.speed")}
             value={preferences.speed}
             onChange={updatePreference("speed")}
             emphasis="primary"
           />
           <PreferenceCard
             icon="people"
-            label="Avoid Crowds"
+            label={t("preferences.crowding")}
             value={preferences.crowding}
             onChange={updatePreference("crowding")}
           />
           <PreferenceCard
             icon="card"
-            label="Price Sensitivity"
+            label={t("preferences.price")}
             value={preferences.price}
             onChange={updatePreference("price")}
             emphasis="primary"
           />
           <PreferenceCard
             icon="git-branch"
-            label="Fewer Transfers"
+            label={t("preferences.transfer")}
             value={preferences.transfer}
             onChange={updatePreference("transfer")}
           />
           <PreferenceCard
             icon="walk"
-            label="Walking"
+            label={t("preferences.walking")}
             value={preferences.walking}
             onChange={updatePreference("walking")}
             emphasis="primary"
           />
 
-          <ThemedText style={styles.sectionLabel}>Routing Options</ThemedText>
+          <ThemedText style={styles.sectionLabel}>
+            {t("preferences.options.section")}
+          </ThemedText>
           <OptionCard
-            label="Max Walking Distance (m)"
+            label={t("preferences.options.maxWalkingDistance")}
             value={options.maxWalkingDistanceM}
             onChange={updateOption("maxWalkingDistanceM")}
             step={50}
-            hint="min 50"
+            hint={t("preferences.hint.min50")}
           />
           <OptionCard
-            label="Max Total Walking Distance (m)"
+            label={t("preferences.options.maxTotalWalkingDistance")}
             value={options.maxTotalWalkingDistanceM}
             onChange={updateOption("maxTotalWalkingDistanceM")}
             step={100}
-            hint="range 0 .. 10000"
+            hint={t("preferences.hint.rangeWalkTotal")}
           />
           <OptionCard
-            label="Max Walking Neighbors"
+            label={t("preferences.options.maxWalkingNeighbors")}
             value={options.maxWalkingNeighbors}
             onChange={updateOption("maxWalkingNeighbors")}
             step={1}
-            hint="range 1 .. 100"
+            hint={t("preferences.hint.rangeNeighbors")}
           />
           <OptionCard
-            label="Max Bus Transfers"
+            label={t("preferences.options.maxBusTransfers")}
             value={options.maxBusTransfers}
             onChange={updateOption("maxBusTransfers")}
             step={1}
-            hint="range 0 .. 10"
+            hint={t("preferences.hint.rangeTransfers")}
           />
           <OptionCard
-            label="Walking Speed (m/s)"
+            label={t("preferences.options.walkingSpeed")}
             value={options.walkingSpeedMps}
             onChange={updateOption("walkingSpeedMps")}
             step={0.1}
-            hint="range 0.4 .. 3.5"
+            hint={t("preferences.hint.rangeSpeed")}
             precision={1}
           />
 
           {setRoutingPreferencesMutation.isError ? (
             <ThemedText style={styles.errorText}>
-              Could not save preferences.
+              {t("preferences.saveError")}
             </ThemedText>
           ) : null}
 
@@ -470,7 +471,7 @@ export default function PreferencesScreen() {
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <ThemedText style={styles.applyButtonText}>
-                Save Preferences
+                {t("preferences.save")}
               </ThemedText>
             )}
           </TouchableOpacity>
@@ -485,31 +486,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Kinetic.surfaceLow,
   },
+  safeAreaRtl: {
+    direction: "rtl",
+  },
   keyboardAvoiding: {
     flex: 1,
   },
   content: {
     paddingHorizontal: 22,
     gap: 16,
-  },
-  topBar: {
-    height: 64,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  topTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: Kinetic.onSurface,
-    marginLeft: 8,
   },
   heroBlock: {
     gap: 4,

@@ -8,6 +8,7 @@ import type {
 } from "../../../types/navigation";
 import { Colors } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { useLanguage } from "@/hooks/LanguageContext";
 
 type RouteStepsListProps = {
   routeResult: NavigationRouteResult;
@@ -19,14 +20,23 @@ function pointName(index: number): string {
   return `Point ${String.fromCharCode(base + (index % 26))}`;
 }
 
-function stepTitle(segment: RouteSegment): string {
+function stepTitle(
+  segment: RouteSegment,
+  takeBusLabel: string,
+  routeFallback: string,
+  walkLabel: string,
+): string {
   if (segment.mode === "walk") {
-    return "Walk";
+    return walkLabel;
   }
-  return `Take Bus ${segment.routeName ?? "Route"}`;
+  return `${takeBusLabel} ${segment.routeName ?? routeFallback}`;
 }
 
-function stepDetails(segment: RouteSegment, index: number): string {
+function stepDetails(
+  segment: RouteSegment,
+  index: number,
+  viaLabel: string,
+): string {
   const mins = Math.max(1, Math.round(segment.timeSeconds / 60));
   const meters = Math.round(segment.distanceM);
 
@@ -41,7 +51,7 @@ function stepDetails(segment: RouteSegment, index: number): string {
     .filter(Boolean);
 
   if (segment.mode === "bus" && busNodes.length > 0) {
-    return `via ${busNodes.join(", ")} | ${mins} min | ${meters}m`;
+    return `${viaLabel} ${busNodes.join(", ")} | ${mins} min | ${meters}m`;
   }
 
   return `${mins} min | ${meters}m`;
@@ -51,6 +61,8 @@ export function RouteStepsList({
   routeResult,
   pointColorByLabel,
 }: RouteStepsListProps) {
+  const { t } = useLanguage();
+
   return (
     <View style={styles.stepsWrap}>
       {routeResult.segments.map((segment, index) => (
@@ -86,9 +98,16 @@ export function RouteStepsList({
             </View>
           </View>
 
-          <ThemedText style={styles.stepTitle}>{stepTitle(segment)}</ThemedText>
+          <ThemedText style={styles.stepTitle}>
+            {stepTitle(
+              segment,
+              t("steps.takeBus"),
+              t("steps.routeFallback"),
+              t("steps.walk"),
+            )}
+          </ThemedText>
           <ThemedText style={styles.stepSubtitle}>
-            {stepDetails(segment, index)}
+            {stepDetails(segment, index, t("steps.via"))}
           </ThemedText>
         </View>
       ))}

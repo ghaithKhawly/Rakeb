@@ -7,49 +7,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Kinetic } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
 import { useAuth } from "@/hooks/AuthContext";
-
-function SettingsCard({
-  icon,
-  title,
-  subtitle,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={styles.card}
-      activeOpacity={0.85}
-      onPress={onPress}
-    >
-      <View style={styles.cardLeft}>
-        <View style={styles.cardIconWrap}>
-          <Ionicons name={icon} size={24} color={Kinetic.primary} />
-        </View>
-        <View style={styles.cardCopy}>
-          <ThemedText style={styles.cardTitle}>{title}</ThemedText>
-          <ThemedText style={styles.cardSubtitle}>{subtitle}</ThemedText>
-        </View>
-      </View>
-      <Ionicons
-        name="chevron-forward"
-        size={20}
-        color={Kinetic.onSurfaceVariant}
-      />
-    </TouchableOpacity>
-  );
-}
+import { useLanguage } from "@/hooks/LanguageContext";
+import { SettingsActionCard } from "@/components/settings/SettingsActionCard";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const insets = useSafeAreaInsets();
+  const { language, isRTL, setLanguage, t } = useLanguage();
 
   return (
-    <View style={styles.safeArea}>
+    <View style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -60,43 +28,99 @@ export default function SettingsScreen() {
         ]}
       >
         <View style={styles.hero}>
-          <ThemedText style={styles.heroTitle}>Settings</ThemedText>
+          <ThemedText style={[styles.heroTitle, isRTL && styles.textRtl]}>
+            {t("settings.title")}
+          </ThemedText>
           <ThemedText style={styles.heroSubtitle}>
-            Customize your movement through the city.
+            {t("settings.subtitle")}
           </ThemedText>
         </View>
 
-        <View style={styles.profileCard}>
+        <View style={[styles.profileCard, isRTL && styles.rowRtl]}>
           <View style={styles.profileAvatar}>
             <Ionicons name="person" size={24} color={Kinetic.primary} />
           </View>
           <View>
             <ThemedText style={styles.profileName}>
-              {user?.username ?? "User"}
+              {user?.username ?? t("settings.userFallback")}
             </ThemedText>
           </View>
         </View>
 
         <View style={styles.section}>
-          <ThemedText style={styles.sectionLabel}>Transportation</ThemedText>
-          <SettingsCard
+          <ThemedText style={[styles.sectionLabel, isRTL && styles.textRtl]}>
+            {t("settings.section.transportation")}
+          </ThemedText>
+          <SettingsActionCard
             icon="map"
-            title="Routes Map"
-            subtitle="View and toggle active bus lines"
+            title={t("settings.routes.title")}
+            subtitle={t("settings.routes.subtitle")}
+            isRTL={isRTL}
             onPress={() => router.push("/(settings)/routes")}
           />
-          <SettingsCard
+          <SettingsActionCard
             icon="options"
-            title="Preferences"
-            subtitle="Customize routing factors"
+            title={t("settings.preferences.title")}
+            subtitle={t("settings.preferences.subtitle")}
+            isRTL={isRTL}
             onPress={() => router.push("/(settings)/preferences" as never)}
           />
-          <SettingsCard
+          <SettingsActionCard
             icon="time"
-            title="Travel History"
-            subtitle="See and manage your saved route history"
+            title={t("settings.history.title")}
+            subtitle={t("settings.history.subtitle")}
+            isRTL={isRTL}
             onPress={() => router.push("/(settings)/history" as never)}
           />
+
+          <View style={styles.languageCard}>
+            <View style={styles.languageHeader}>
+              <ThemedText style={styles.cardTitle}>
+                {t("settings.language.title")}
+              </ThemedText>
+              <ThemedText style={styles.cardSubtitle}>
+                {t("settings.language.subtitle")}
+              </ThemedText>
+            </View>
+            <View style={styles.languageToggleRow}>
+              <TouchableOpacity
+                style={[
+                  styles.languageButton,
+                  language === "en" && styles.languageButtonActive,
+                ]}
+                onPress={() => {
+                  void setLanguage("en");
+                }}
+              >
+                <ThemedText
+                  style={[
+                    styles.languageButtonText,
+                    language === "en" && styles.languageButtonTextActive,
+                  ]}
+                >
+                  {t("language.english")}
+                </ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.languageButton,
+                  language === "ar" && styles.languageButtonActive,
+                ]}
+                onPress={() => {
+                  void setLanguage("ar");
+                }}
+              >
+                <ThemedText
+                  style={[
+                    styles.languageButtonText,
+                    language === "ar" && styles.languageButtonTextActive,
+                  ]}
+                >
+                  {t("language.arabic")}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -107,7 +131,9 @@ export default function SettingsScreen() {
           }}
         >
           <Ionicons name="log-out-outline" size={20} color="#BA1A1A" />
-          <ThemedText style={styles.signOutText}>Sign Out</ThemedText>
+          <ThemedText style={styles.signOutText}>
+            {t("settings.signout")}
+          </ThemedText>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -118,6 +144,15 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Kinetic.surfaceLow,
+  },
+  safeAreaRtl: {
+    direction: "rtl",
+  },
+  rowRtl: {
+    flexDirection: "row-reverse",
+  },
+  textRtl: {
+    textAlign: "right",
   },
   content: {
     paddingHorizontal: 24,
@@ -172,33 +207,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 4,
   },
-  card: {
-    borderRadius: 22,
-    backgroundColor: Kinetic.surfaceContainer,
-    minHeight: 92,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  cardLeft: {
-    flexDirection: "row",
-    gap: 14,
-    alignItems: "center",
-    flex: 1,
-  },
-  cardIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "#dde1ff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardCopy: {
-    flex: 1,
-  },
   cardTitle: {
     fontSize: 18,
     fontWeight: "800",
@@ -208,6 +216,43 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Kinetic.onSurfaceVariant,
     marginTop: 2,
+  },
+  languageCard: {
+    borderRadius: 22,
+    backgroundColor: Kinetic.surfaceContainer,
+    minHeight: 112,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  languageHeader: {
+    gap: 2,
+  },
+  languageToggleRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  languageButton: {
+    flex: 1,
+    height: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Kinetic.outlineVariant,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  languageButtonActive: {
+    borderColor: Kinetic.primary,
+    backgroundColor: "#dfe6ff",
+  },
+  languageButtonText: {
+    color: Kinetic.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  languageButtonTextActive: {
+    color: Kinetic.primary,
   },
   signOutButton: {
     height: 58,
