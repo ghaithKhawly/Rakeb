@@ -14,6 +14,7 @@ export const registerSchema = {
       properties: {
         message: { type: "string" },
         userId: { type: "number" },
+        role: { type: "string" },
         token: { type: "string" }
       }
     },
@@ -52,7 +53,8 @@ export const loginSchema = {
           type: "object",
           properties: {
             id: { type: "number" },
-            username: { type: "string" }
+            username: { type: "string" },
+            role: { type: "string" },
           }
         }
       }
@@ -70,4 +72,66 @@ export const loginSchema = {
       }
     }
   }
+};
+
+export const promoteUserToDriverSchema = {
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      userId: { type: "integer", minimum: 1 },
+      username: { type: "string", minLength: 3, maxLength: 50 },
+    },
+    oneOf: [
+      { required: ["userId"] },
+      { required: ["username"] },
+    ],
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        user: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            username: { type: "string" },
+            role: { type: "string" },
+          },
+        },
+      },
+    },
+    400: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    403: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    404: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    500: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
 };

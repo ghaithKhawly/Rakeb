@@ -9,6 +9,7 @@ import type {
   RoutingWorkerPayload,
 } from "../../../types/navigation";
 import {
+  AVAILABILITY_COST_COEFF,
   TRANSFER_EXP_COEFF,
   TRANSFER_EXP_RATE,
   TRANSFER_REF,
@@ -139,7 +140,8 @@ function computeCost(
     + (weights.crowding * parts.crowding)
     + (weights.price * parts.price)
     + (weights.transfer * parts.transfer)
-    + (weights.walking * parts.walking);
+    + (weights.walking * parts.walking)
+    + (AVAILABILITY_COST_COEFF * parts.availability);
 }
 
 function bucketKey(lat: number, lng: number, bucketSizeDeg: number): string {
@@ -262,6 +264,7 @@ export function buildWalkingEdge(
     transfer: 0,
     walking: (linearCoeff * (distanceM / WALK_DISTANCE_REF_M))
       + (expCoeff * (Math.exp(distanceM / expScaleM) - 1)),
+    availability: 0,
   };
 
   return {
@@ -304,6 +307,11 @@ export function buildBusEdge(
       * (config.transferExpCoeff ?? TRANSFER_EXP_COEFF)
       * (Math.exp((config.transferExpRate ?? TRANSFER_EXP_RATE) * (transfersAfter - 2)) - 1);
 
+  const availabilityRatio = typeof metrics?.availabilityRatio === "number"
+    ? clamp(metrics.availabilityRatio, 0, 1)
+    : 1;
+  const availabilityCost = 1 - availabilityRatio;
+
   const boardedBus = edge.route_id !== null && previousRouteId !== edge.route_id;
   const priceBase = metrics?.effectivePrice;
   const priceComponent = boardedBus
@@ -316,6 +324,7 @@ export function buildBusEdge(
     price: priceComponent,
     transfer: transferCost,
     walking: 0,
+    availability: availabilityCost,
   };
 
   return {
@@ -388,5 +397,6 @@ export function mergeComponents(
     price: total.price + addition.price,
     transfer: total.transfer + addition.transfer,
     walking: total.walking + addition.walking,
+    availability: total.availability + addition.availability,
   };
 }

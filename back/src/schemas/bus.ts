@@ -8,7 +8,30 @@ export const busRouteSchema = {
     base_price: { type: ["number", "null"] },
     frequency_minutes: { type: ["number", "null"] },
     crowding_tendency: { type: ["string", "null"] },
+    max_active_buses: { type: ["integer", "null"] },
     created_at: { type: ["string", "null"] },
+  },
+};
+
+export const routeAvailabilitySchema = {
+  type: "object",
+  properties: {
+    routeId: { type: "integer" },
+    activeDriverCount: { type: "integer" },
+    maxActiveBuses: { type: "integer" },
+    availabilityRatio: { type: "number" },
+    updatedAt: { type: ["string", "null"] },
+  },
+};
+
+export const driverSessionSchema = {
+  type: "object",
+  properties: {
+    sessionId: { type: "integer" },
+    userId: { type: "integer" },
+    routeId: { type: "integer" },
+    checkedInAt: { type: "string" },
+    checkedOutAt: { type: ["string", "null"] },
   },
 };
 
@@ -289,12 +312,125 @@ export const getRouteLiveMetricsSchema = {
               effectiveCrowdingScore: { type: ["number", "null"] },
               effectiveSlownessMultiplier: { type: "number" },
               suggestedAvgSpeedKmh: { type: ["number", "null"] },
+              activeDriverCount: { type: "integer" },
+              maxActiveBuses: { type: "integer" },
+              availabilityRatio: { type: "number" },
               lastReportAt: { type: ["string", "null"] },
               updatedAt: { type: ["string", "null"] },
             },
           },
         },
       },
+    },
+  },
+};
+
+export const driverCheckInSchema = {
+  tags: ["Bus Driver"],
+  summary: "Check a driver into a bus route",
+  operationId: "driverCheckIn",
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    required: ["routeId"],
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        session: driverSessionSchema,
+        availability: routeAvailabilitySchema,
+      },
+    },
+    401: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    403: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    404: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    409: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+  },
+};
+
+export const driverCheckOutSchema = {
+  tags: ["Bus Driver"],
+  summary: "Check a driver out of a bus route",
+  operationId: "driverCheckOut",
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        session: driverSessionSchema,
+        availability: routeAvailabilitySchema,
+      },
+    },
+    401: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    403: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    404: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+    409: {
+      type: "object",
+      properties: { error: { type: "string" } },
+    },
+  },
+};
+
+export const getRouteAvailabilitySchema = {
+  tags: ["Bus Driver"],
+  summary: "Get current driver availability for bus routes",
+  operationId: "getRouteAvailability",
+  security: [{ bearerAuth: [] }],
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      routeId: { type: "integer", minimum: 1 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        availability: {
+          type: "array",
+          items: routeAvailabilitySchema,
+        },
+      },
+    },
+    401: {
+      type: "object",
+      properties: { error: { type: "string" } },
     },
   },
 };

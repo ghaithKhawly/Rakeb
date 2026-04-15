@@ -7,6 +7,7 @@ import type {
 } from "../../../../../types/navigation";
 import { graphCache } from "../../../services/graphCache";
 import { routingWorkerClient } from "../../../services/routingWorkerClient";
+import { loadRouteMetrics as loadSharedRouteMetrics } from "../../../services/routingMetrics";
 import {
   DEFAULT_MAX_BUS_TRANSFERS,
   TRANSFER_EXP_COEFF,
@@ -39,37 +40,7 @@ const DEFAULT_CONFIG: EffectiveRoutingConfig = {
 };
 
 async function loadRouteMetrics(fastify: FastifyInstance): Promise<RouteLiveMetricForRouting[]> {
-  const metricsRes = await fastify.pg.query<{
-    route_id: number;
-    effective_price: number | null;
-    effective_speed_score: number | null;
-    effective_crowding_score: number | null;
-    effective_slowness_multiplier: number | null;
-  }>(
-    `
-    SELECT
-      route_id,
-      effective_price,
-      effective_speed_score,
-      effective_crowding_score,
-      effective_slowness_multiplier
-    FROM route_live_metrics
-    `,
-  );
-
-  return metricsRes.rows.map((row: {
-    route_id: number;
-    effective_price: number | null;
-    effective_speed_score: number | null;
-    effective_crowding_score: number | null;
-    effective_slowness_multiplier: number | null;
-  }) => ({
-    routeId: row.route_id,
-    effectivePrice: row.effective_price,
-    effectiveSpeedScore: row.effective_speed_score,
-    effectiveCrowdingScore: row.effective_crowding_score,
-    effectiveSlownessMultiplier: row.effective_slowness_multiplier,
-  }));
+  return loadSharedRouteMetrics(fastify.pg);
 }
 
 async function routeWithFallback(payload: {

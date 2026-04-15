@@ -49,6 +49,9 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
   const allowStartAnchorOverCap = payload.relaxation?.allowStartAnchorOverCap === true;
   const allowEndAnchorOverCap = payload.relaxation?.allowEndAnchorOverCap === true;
   const requireBusSegment = payload.relaxation?.requireBusSegment === true;
+  const enforceStrictAvailability =
+    process.env.ROUTING_STRICT_AVAILABILITY === "1"
+    || (process.env.ROUTING_STRICT_AVAILABILITY == null && process.env.NODE_ENV === "production");
   const diagnostics = createDiagnostics();
   const longWalkThresholdM = Math.max(1000, Math.min(config.maxWalkingDistanceM * 0.9, config.maxWalkingDistanceM));
   const minBusDistanceBetweenLongWalksM = Math.max(800, config.maxTotalWalkingDistanceM * 0.25);
@@ -69,6 +72,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
         price: 0,
         transfer: 0,
         walking: 0,
+        availability: 0,
       },
       transferCount: 0,
       walkingDistanceM: 0,
@@ -171,6 +175,17 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     } else {
       const busEdges = indexes.busAdjacency.get(currentState.nodeId) ?? [];
       for (const edge of busEdges) {
+        if (enforceStrictAvailability && edge.route_id != null) {
+          const metric = metricsByRoute.get(edge.route_id);
+          const availabilityRatio = typeof metric?.availabilityRatio === "number"
+            ? metric.availabilityRatio
+            : 0;
+
+          if (availabilityRatio <= 0) {
+            continue;
+          }
+        }
+
         candidateEdges.push(buildBusEdge(
           edge,
           currentState.routeId,
@@ -348,6 +363,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     price: 0,
     transfer: 0,
     walking: 0,
+    availability: 0,
   };
 
   const components = steps.reduce((acc, step) => mergeComponents(acc, step.components), zero);

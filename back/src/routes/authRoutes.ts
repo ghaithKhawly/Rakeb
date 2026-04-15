@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import bcrypt from "bcrypt";
-import { registerSchema, loginSchema } from "../schemas/auth";
+import { loginSchema, promoteUserToDriverSchema, registerSchema } from "../schemas/auth";
 
 export async function authRoutes(fastify: FastifyInstance) {
 
@@ -32,23 +32,25 @@ export async function authRoutes(fastify: FastifyInstance) {
 
         const result = await client.query(
           `
-          INSERT INTO users (username, password_hash)
-          VALUES ($1, $2)
-          RETURNING id
+          INSERT INTO users (username, password_hash, role)
+          VALUES ($1, $2, 'rider')
+          RETURNING id, role
           `,
           [username, passwordHash]
         );
 
         const userId = result.rows[0].id;
+        const role = result.rows[0].role;
 
         const token = fastify.jwt.sign(
-          { id: userId, username },
+          { id: userId, username, role },
           { expiresIn: "7d" }
         );
 
         return reply.code(201).send({
           message: "User registered successfully",
           userId,
+          role,
           token
         });
 
@@ -77,7 +79,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
       try {
         const result = await client.query(
-          "SELECT id, password_hash FROM users WHERE username = $1",
+          "SELECT id, password_hash, role FROM users WHERE username = $1",
           [username]
         );
 
@@ -101,7 +103,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         }
 
         const token = fastify.jwt.sign(
-          { id: user.id, username },
+          { id: user.id, username, role: user.role },
           { expiresIn: "7d" }
         );
 
@@ -110,7 +112,8 @@ export async function authRoutes(fastify: FastifyInstance) {
           token,
           user: {
             id: user.id,
-            username
+            username,
+            role: user.role
           }
         });
 
@@ -123,5 +126,92 @@ export async function authRoutes(fastify: FastifyInstance) {
         client.release();
       }
     }
+  );
+
+  fastify.post(
+    "/admin/users/promote-driver",
+    {
+      preHandler: [fastify.authenticate],
+      schema: promoteUserToDriverSchema,
+    },
+    async (request, reply) => {
+      const actorPayload = request.user as { id?: number | string } | undefined;
+      const actorId = Number(actorPayload?.id);
+
+      if (!Number.isFinite(actorId)) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const body = request.body as { userId?: number; username?: string };
+      const targetUserId = typeof body.userId === "number" ? body.userId : null;
+      const targetUsername = typeof body.username === "string" ? body.username.trim() : null;
+
+      const client = await fastify.pg.connect();
+
+      try {
+        const actorRes = await client.query<{ role: string | null }>(
+          "SELECT role FROM users WHERE id = $1",
+          [actorId],
+        );
+
+        if (actorRes.rows.length === 0) {
+          return reply.code(401).send({ error: "Unauthorized user payload" });
+        }
+
+        const actorRole = actorRes.rows[0].role;
+        if (actorRole !== "admin") {
+          return reply.code(403).send({ error: "Admin role required" });
+        }
+
+        const targetRes = await client.query<{ id: number; username: string; role: string | null }>(
+          `
+          SELECT id, username, role
+          FROM users
+          WHERE ($1::int IS NOT NULL AND id = $1)
+             OR ($2::text IS NOT NULL AND username = $2)
+          ORDER BY id ASC
+          LIMIT 1
+          `,
+          [targetUserId, targetUsername],
+        );
+
+        if (targetRes.rows.length === 0) {
+          return reply.code(404).send({ error: "Target user not found" });
+        }
+
+        const target = targetRes.rows[0];
+        if (target.role === "driver") {
+          return reply.code(200).send({
+            message: "User is already a driver",
+            user: {
+              id: target.id,
+              username: target.username,
+              role: "driver",
+            },
+          });
+        }
+
+        const updatedRes = await client.query<{ id: number; username: string; role: string }>(
+          `
+          UPDATE users
+          SET role = 'driver',
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+          RETURNING id, username, role
+          `,
+          [target.id],
+        );
+
+        return reply.code(200).send({
+          message: "User promoted to driver",
+          user: updatedRes.rows[0],
+        });
+      } catch (error) {
+        request.log.error({ error }, "Failed to promote user to driver");
+        return reply.code(500).send({ error: "Internal server error" });
+      } finally {
+        client.release();
+      }
+    },
   );
 }

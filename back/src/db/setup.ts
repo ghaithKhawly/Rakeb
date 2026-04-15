@@ -12,9 +12,33 @@ export async function setupDatabase(fastify: FastifyInstance) {
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL DEFAULT 'rider',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='users' AND column_name='role'
+        ) THEN
+          ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'rider';
+        END IF;
+
+        UPDATE users SET role = COALESCE(NULLIF(role, ''), 'rider');
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'chk_users_role'
+        ) THEN
+          ALTER TABLE users
+          ADD CONSTRAINT chk_users_role
+          CHECK (role IN ('rider', 'driver', 'admin'));
+        END IF;
+      END $$;
     `);
 
     await client.query(`
@@ -72,9 +96,34 @@ export async function setupDatabase(fastify: FastifyInstance) {
         base_price INTEGER DEFAULT 3000,
         frequency_minutes INTEGER,
         crowding_tendency VARCHAR(10) DEFAULT 'medium',
+        max_active_buses INTEGER NOT NULL DEFAULT 1,
         geom GEOMETRY(LINESTRING, 4326),          -- full route geometry for display
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='routes' AND column_name='max_active_buses'
+        ) THEN
+          ALTER TABLE routes ADD COLUMN max_active_buses INTEGER NOT NULL DEFAULT 1;
+        END IF;
+
+        UPDATE routes
+        SET max_active_buses = GREATEST(COALESCE(max_active_buses, 1), 1);
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'chk_routes_max_active_buses'
+        ) THEN
+          ALTER TABLE routes
+          ADD CONSTRAINT chk_routes_max_active_buses
+          CHECK (max_active_buses >= 1 AND max_active_buses <= 1000);
+        END IF;
+      END $$;
     `);
 
     // Enforce updated defaults for existing installations too.
@@ -290,6 +339,55 @@ export async function setupDatabase(fastify: FastifyInstance) {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_route_live_metrics_updated_at ON route_live_metrics(updated_at DESC);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS route_driver_availability (
+        route_id INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
+        active_driver_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (active_driver_count >= 0)
+      );
+      CREATE INDEX IF NOT EXISTS idx_route_driver_availability_updated_at ON route_driver_availability(updated_at DESC);
+    `);
+
+    await client.query(`
+      INSERT INTO route_driver_availability (route_id, active_driver_count)
+      SELECT id, 0
+      FROM routes
+      ON CONFLICT (route_id) DO NOTHING;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS driver_sessions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+        checked_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        checked_out_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (checked_out_at IS NULL OR checked_out_at >= checked_in_at)
+      );
+      CREATE INDEX IF NOT EXISTS idx_driver_sessions_user_active ON driver_sessions(user_id) WHERE checked_out_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_driver_sessions_route_active ON driver_sessions(route_id) WHERE checked_out_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_driver_sessions_route_time ON driver_sessions(route_id, checked_in_at DESC);
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND tablename = 'driver_sessions'
+            AND indexname = 'uq_driver_sessions_user_active'
+        ) THEN
+          CREATE UNIQUE INDEX uq_driver_sessions_user_active
+          ON driver_sessions(user_id)
+          WHERE checked_out_at IS NULL;
+        END IF;
+      END $$;
     `);
 
     await client.query(`

@@ -90,6 +90,9 @@ export type RouteLiveMetricForRouting = {
   effectiveSpeedScore: number | null;
   effectiveCrowdingScore: number | null;
   effectiveSlownessMultiplier: number | null;
+  activeDriverCount: number;
+  maxActiveBuses: number;
+  availabilityRatio: number;
 };
 
 export type EffectiveRoutingConfig = {
@@ -126,6 +129,7 @@ export type RouteCostBreakdown = {
   price: number;
   transfer: number;
   walking: number;
+  availability: number;
 };
 
 export type RouteSegment = {

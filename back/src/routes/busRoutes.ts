@@ -4,10 +4,13 @@ import {
   deleteUserTravelHistorySchema,
   deleteBussesSchema,
   deleteBusSchema,
+  driverCheckInSchema,
+  driverCheckOutSchema,
   graphCacheQuerySchema,
   getBusFeedbackSummarySchema,
   getRoutingPreferencesSchema,
   getRouteLiveMetricsSchema,
+  getRouteAvailabilitySchema,
   getUserTravelHistorySchema,
   getGraphSchema,
   getBusSchema,
@@ -17,6 +20,10 @@ import {
   submitBusFeedbackSchema,
 } from "../schemas/bus";
 import type {
+  DriverCheckInBody,
+  DriverCheckInResponse,
+  DriverCheckOutBody,
+  DriverCheckOutResponse,
   DeleteUserTravelHistoryQuery,
   DeleteBusesQuery,
   DeleteBusQuery,
@@ -25,6 +32,7 @@ import type {
   GetBusesQuery,
   GetGraphQuery,
   GetRouteLiveMetricsQuery,
+  RouteAvailabilityResponse,
   GetUserTravelHistoryQuery,
   GraphCacheQuery,
   InvalidateGraphQuery,
@@ -42,6 +50,7 @@ import type {
 } from "../../../types/navigation";
 import { graphCache } from "../services/graphCache";
 import { routingWorkerClient } from "../services/routingWorkerClient";
+import { loadRouteAvailability, loadRouteMetrics } from "../services/routingMetrics";
 import {
   DEFAULT_MAX_BUS_TRANSFERS,
   TRANSFER_EXP_COEFF,
@@ -206,6 +215,76 @@ function normalizeRouteResultForSchema(
       ? result.primaryAlternativeIndex
       : 0,
   };
+}
+
+type DriverUserRow = {
+  role: string | null;
+};
+
+type DriverSessionRow = {
+  id: number;
+  user_id: number;
+  route_id: number;
+  checked_in_at: string;
+  checked_out_at: string | null;
+};
+
+type RouteAvailabilityDbRow = {
+  route_id: number;
+  active_driver_count: number;
+  max_active_buses: number;
+  availability_ratio: number;
+  availability_updated_at: string | null;
+};
+
+function mapDriverSessionRow(row: DriverSessionRow) {
+  return {
+    sessionId: row.id,
+    userId: row.user_id,
+    routeId: row.route_id,
+    checkedInAt: row.checked_in_at,
+    checkedOutAt: row.checked_out_at,
+  };
+}
+
+function mapRouteAvailabilityRow(row: RouteAvailabilityDbRow) {
+  return {
+    routeId: row.route_id,
+    activeDriverCount: row.active_driver_count,
+    maxActiveBuses: row.max_active_buses,
+    availabilityRatio: row.availability_ratio,
+    updatedAt: row.availability_updated_at,
+  };
+}
+
+function getAuthenticatedUserId(request: { user?: unknown }): number | null {
+  const userPayload = request.user as { id?: number | string } | undefined;
+  const userId = Number(userPayload?.id);
+  return Number.isFinite(userId) ? userId : null;
+}
+
+async function requireDriverRole(
+  client: { query<T extends Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: T[] }> },
+  userId: number,
+) {
+  const result = await client.query<DriverUserRow>(
+    "SELECT role FROM users WHERE id = $1",
+    [userId],
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return result.rows[0].role;
+}
+
+async function readCurrentAvailability(
+  source: Parameters<typeof loadRouteAvailability>[0],
+  routeId?: number,
+) {
+  const rows = await loadRouteAvailability(source, routeId);
+  return rows.map(mapRouteAvailabilityRow);
 }
 
 type RouteProfile = {
@@ -682,37 +761,7 @@ export async function busRoutes(fastify: FastifyInstance) {
           );
         }
 
-        const metricsRes = await client.query<{
-          route_id: number;
-          effective_price: number | null;
-          effective_speed_score: number | null;
-          effective_crowding_score: number | null;
-          effective_slowness_multiplier: number | null;
-        }>(
-          `
-          SELECT
-            route_id,
-            effective_price,
-            effective_speed_score,
-            effective_crowding_score,
-            effective_slowness_multiplier
-          FROM route_live_metrics
-          `,
-        );
-
-        const routeMetrics: RouteLiveMetricForRouting[] = metricsRes.rows.map((row: {
-          route_id: number;
-          effective_price: number | null;
-          effective_speed_score: number | null;
-          effective_crowding_score: number | null;
-          effective_slowness_multiplier: number | null;
-        }) => ({
-          routeId: row.route_id,
-          effectivePrice: row.effective_price,
-          effectiveSpeedScore: row.effective_speed_score,
-          effectiveCrowdingScore: row.effective_crowding_score,
-          effectiveSlownessMultiplier: row.effective_slowness_multiplier,
-        }));
+        const routeMetrics: RouteLiveMetricForRouting[] = await loadRouteMetrics(client);
 
         const config = await getEffectiveRoutingConfig(client, userId, body);
         if (debugRoutingLogs) {
@@ -1035,37 +1084,7 @@ export async function busRoutes(fastify: FastifyInstance) {
 
         const client = await fastify.pg.connect();
         try {
-          const metricsRes = await client.query<{
-            route_id: number;
-            effective_price: number | null;
-            effective_speed_score: number | null;
-            effective_crowding_score: number | null;
-            effective_slowness_multiplier: number | null;
-          }>(
-            `
-            SELECT
-              route_id,
-              effective_price,
-              effective_speed_score,
-              effective_crowding_score,
-              effective_slowness_multiplier
-            FROM route_live_metrics
-            `,
-          );
-
-          const routeMetrics: RouteLiveMetricForRouting[] = metricsRes.rows.map((row: {
-            route_id: number;
-            effective_price: number | null;
-            effective_speed_score: number | null;
-            effective_crowding_score: number | null;
-            effective_slowness_multiplier: number | null;
-          }) => ({
-            routeId: row.route_id,
-            effectivePrice: row.effective_price,
-            effectiveSpeedScore: row.effective_speed_score,
-            effectiveCrowdingScore: row.effective_crowding_score,
-            effectiveSlownessMultiplier: row.effective_slowness_multiplier,
-          }));
+          const routeMetrics: RouteLiveMetricForRouting[] = await loadRouteMetrics(client);
 
           const config = await getEffectiveRoutingConfig(client, 0, body);
 
@@ -1467,6 +1486,281 @@ export async function busRoutes(fastify: FastifyInstance) {
     saveRoutingPreferences,
   );
 
+  fastify.post(
+    "/bus/driver/check-in",
+    {
+      preHandler: [fastify.authenticate],
+      schema: driverCheckInSchema,
+    },
+    async (request, reply) => {
+      const userId = getAuthenticatedUserId(request);
+      if (userId == null) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const body = request.body as DriverCheckInBody;
+      const client = await fastify.pg.connect();
+      try {
+        await client.query("BEGIN");
+
+        const role = await requireDriverRole(client, userId);
+        if (role == null) {
+          await client.query("ROLLBACK");
+          return reply.code(401).send({ error: "Unauthorized user payload" });
+        }
+
+        if (role !== "driver" && role !== "admin") {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ error: "Driver role required" });
+        }
+
+        const routeRes = await client.query<{ id: number; max_active_buses: number }>(
+          "SELECT id, max_active_buses FROM routes WHERE id = $1 AND type = $2",
+          [body.routeId, "bus"],
+        );
+
+        if (routeRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ error: "Bus route not found" });
+        }
+
+        const route = routeRes.rows[0];
+
+        const activeSessionRes = await client.query<DriverSessionRow>(
+          `
+          SELECT id, user_id, route_id, checked_in_at, checked_out_at
+          FROM driver_sessions
+          WHERE user_id = $1 AND checked_out_at IS NULL
+          FOR UPDATE
+          `,
+          [userId],
+        );
+
+        if (activeSessionRes.rows.length > 0) {
+          const activeSession = activeSessionRes.rows[0];
+          if (activeSession.route_id === body.routeId) {
+            await client.query("COMMIT");
+            const availability = await readCurrentAvailability(fastify.pg, body.routeId);
+            return reply.code(200).send({
+              message: "Driver already checked in on this route",
+              session: mapDriverSessionRow(activeSession),
+              availability: availability[0] ?? {
+                routeId: body.routeId,
+                activeDriverCount: 0,
+                maxActiveBuses: route.max_active_buses,
+                availabilityRatio: 0,
+                updatedAt: null,
+              },
+            } satisfies DriverCheckInResponse);
+          }
+
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: "Driver already checked into another route" });
+        }
+
+        await client.query(
+          `
+          INSERT INTO route_driver_availability (route_id, active_driver_count)
+          VALUES ($1, 0)
+          ON CONFLICT (route_id) DO NOTHING
+          `,
+          [body.routeId],
+        );
+
+        const availabilityRes = await client.query<RouteAvailabilityDbRow>(
+          `
+          SELECT
+            r.id AS route_id,
+            a.active_driver_count::int AS active_driver_count,
+            COALESCE(r.max_active_buses, 1)::int AS max_active_buses,
+            CASE
+              WHEN COALESCE(r.max_active_buses, 1) > 0
+                THEN LEAST(1.0, GREATEST(0.0, a.active_driver_count::float8 / NULLIF(r.max_active_buses, 0)))
+              ELSE 0
+            END AS availability_ratio,
+            a.updated_at AS availability_updated_at
+          FROM routes r
+          JOIN route_driver_availability a ON a.route_id = r.id
+          WHERE r.id = $1
+          FOR UPDATE OF r, a
+          `,
+          [body.routeId],
+        );
+
+        if (availabilityRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ error: "Bus route not found" });
+        }
+
+        const availabilityRow = availabilityRes.rows[0];
+        if (availabilityRow.active_driver_count >= route.max_active_buses) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: "No available bus slots on this route" });
+        }
+
+        const insertRes = await client.query<DriverSessionRow>(
+          `
+          INSERT INTO driver_sessions (user_id, route_id)
+          VALUES ($1, $2)
+          RETURNING id, user_id, route_id, checked_in_at, checked_out_at
+          `,
+          [userId, body.routeId],
+        );
+
+        await client.query(
+          `
+          UPDATE route_driver_availability
+          SET active_driver_count = active_driver_count + 1,
+              updated_at = NOW()
+          WHERE route_id = $1
+          `,
+          [body.routeId],
+        );
+
+        await client.query("COMMIT");
+
+        const availability = await readCurrentAvailability(fastify.pg, body.routeId);
+        return reply.code(200).send({
+          message: "Driver checked in successfully",
+          session: mapDriverSessionRow(insertRes.rows[0]),
+          availability: availability[0] ?? {
+            routeId: body.routeId,
+            activeDriverCount: 0,
+            maxActiveBuses: route.max_active_buses,
+            availabilityRatio: 0,
+            updatedAt: null,
+          },
+        } satisfies DriverCheckInResponse);
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  fastify.post(
+    "/bus/driver/check-out",
+    {
+      preHandler: [fastify.authenticate],
+      schema: driverCheckOutSchema,
+    },
+    async (request, reply) => {
+      const userId = getAuthenticatedUserId(request);
+      if (userId == null) {
+        return reply.code(401).send({ error: "Unauthorized user payload" });
+      }
+
+      const body = request.body as DriverCheckOutBody;
+      const client = await fastify.pg.connect();
+      try {
+        await client.query("BEGIN");
+
+        const role = await requireDriverRole(client, userId);
+        if (role == null) {
+          await client.query("ROLLBACK");
+          return reply.code(401).send({ error: "Unauthorized user payload" });
+        }
+
+        if (role !== "driver" && role !== "admin") {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ error: "Driver role required" });
+        }
+
+        const activeSessionRes = await client.query<DriverSessionRow>(
+          `
+          SELECT id, user_id, route_id, checked_in_at, checked_out_at
+          FROM driver_sessions
+          WHERE user_id = $1 AND checked_out_at IS NULL
+          FOR UPDATE
+          `,
+          [userId],
+        );
+
+        if (activeSessionRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: "No active driver session found" });
+        }
+
+        const activeSession = activeSessionRes.rows[0];
+        if (body.routeId != null && activeSession.route_id !== body.routeId) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: "Active driver session does not match the provided route" });
+        }
+
+        const checkedOutAt = new Date().toISOString();
+        const updateRes = await client.query<DriverSessionRow>(
+          `
+          UPDATE driver_sessions
+          SET checked_out_at = NOW(),
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, user_id, route_id, checked_in_at, checked_out_at
+          `,
+          [activeSession.id],
+        );
+
+        await client.query(
+          `
+          INSERT INTO route_driver_availability (route_id, active_driver_count)
+          VALUES ($1, 0)
+          ON CONFLICT (route_id) DO NOTHING
+          `,
+          [activeSession.route_id],
+        );
+
+        await client.query(
+          `
+          UPDATE route_driver_availability
+          SET active_driver_count = GREATEST(active_driver_count - 1, 0),
+              updated_at = NOW()
+          WHERE route_id = $1
+          `,
+          [activeSession.route_id],
+        );
+
+        await client.query("COMMIT");
+
+        const availability = await readCurrentAvailability(fastify.pg, activeSession.route_id);
+        return reply.code(200).send({
+          message: "Driver checked out successfully",
+          session: {
+            ...mapDriverSessionRow(updateRes.rows[0]),
+            checkedOutAt: checkedOutAt,
+          },
+          availability: availability[0] ?? {
+            routeId: activeSession.route_id,
+            activeDriverCount: 0,
+            maxActiveBuses: 1,
+            availabilityRatio: 0,
+            updatedAt: null,
+          },
+        } satisfies DriverCheckOutResponse);
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  );
+
+  fastify.get(
+    "/bus/driver/availability",
+    {
+      preHandler: [fastify.authenticate],
+      schema: getRouteAvailabilitySchema,
+    },
+    async (request) => {
+      const query = request.query as { routeId?: number };
+      const availability = await readCurrentAvailability(fastify.pg, query.routeId);
+      return {
+        availability,
+      } satisfies RouteAvailabilityResponse;
+    },
+  );
+
   fastify.get(
     "/navigation/history",
     {
@@ -1862,6 +2156,9 @@ export async function busRoutes(fastify: FastifyInstance) {
           effective_crowding_score: number | null;
           effective_slowness_multiplier: number;
           suggested_avg_speed_kmh: number | null;
+          active_driver_count: number;
+          max_active_buses: number;
+          availability_ratio: number;
           last_report_at: string | null;
           updated_at: string | null;
         };
@@ -1882,9 +2179,18 @@ export async function busRoutes(fastify: FastifyInstance) {
             m.effective_crowding_score,
             m.effective_slowness_multiplier,
             m.suggested_avg_speed_kmh,
+            COALESCE(a.active_driver_count, 0)::int AS active_driver_count,
+            COALESCE(r.max_active_buses, 1)::int AS max_active_buses,
+            CASE
+              WHEN COALESCE(r.max_active_buses, 1) > 0
+                THEN LEAST(1.0, GREATEST(0.0, COALESCE(a.active_driver_count, 0)::float8 / NULLIF(r.max_active_buses, 0)))
+              ELSE 0
+            END AS availability_ratio,
             m.last_report_at,
             m.updated_at
           FROM route_live_metrics m
+          JOIN routes r ON r.id = m.route_id
+          LEFT JOIN route_driver_availability a ON a.route_id = m.route_id
           WHERE ($1::int IS NULL OR m.route_id = $1::int)
           ORDER BY m.route_id ASC
           `,
@@ -1905,6 +2211,9 @@ export async function busRoutes(fastify: FastifyInstance) {
             effectiveCrowdingScore: row.effective_crowding_score,
             effectiveSlownessMultiplier: row.effective_slowness_multiplier,
             suggestedAvgSpeedKmh: row.suggested_avg_speed_kmh,
+            activeDriverCount: row.active_driver_count,
+            maxActiveBuses: row.max_active_buses,
+            availabilityRatio: row.availability_ratio,
             lastReportAt: row.last_report_at,
             updatedAt: row.updated_at,
           })),

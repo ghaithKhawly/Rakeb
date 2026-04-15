@@ -7,4 +7,6 @@ export const TRANSFER_REF = 1.0;
 export const TRANSFER_EXP_COEFF = 0.5;
 export const TRANSFER_EXP_RATE = 0.8;
 
+export const AVAILABILITY_COST_COEFF = 0.75;
+
 export const DEFAULT_MAX_BUS_TRANSFERS = 5;

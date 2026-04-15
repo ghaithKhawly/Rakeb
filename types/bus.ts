@@ -8,7 +8,24 @@ export type BusRouteDTO = {
   base_price: number | null;
   frequency_minutes: number | null;
   crowding_tendency: CrowdingTendency | null;
+  max_active_buses?: number | null;
   created_at: string | null;
+};
+
+export type RouteAvailabilitySummary = {
+  routeId: number;
+  activeDriverCount: number;
+  maxActiveBuses: number;
+  availabilityRatio: number;
+  updatedAt: string | null;
+};
+
+export type DriverSessionSummary = {
+  sessionId: number;
+  userId: number;
+  routeId: number;
+  checkedInAt: string;
+  checkedOutAt: string | null;
 };
 
 export type GetBusesQuery = {
@@ -92,4 +109,28 @@ export type SetRoutingPreferencesBody = {
     maxBusTransfers?: number;
     walkingSpeedMps?: number;
   };
+};
+
+export type DriverCheckInBody = {
+  routeId: number;
+};
+
+export type DriverCheckOutBody = {
+  routeId?: number;
+};
+
+export type DriverCheckInResponse = {
+  message: string;
+  session: DriverSessionSummary;
+  availability: RouteAvailabilitySummary;
+};
+
+export type DriverCheckOutResponse = {
+  message: string;
+  session: DriverSessionSummary;
+  availability: RouteAvailabilitySummary;
+};
+
+export type RouteAvailabilityResponse = {
+  availability: RouteAvailabilitySummary[];
 };
