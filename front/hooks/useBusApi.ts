@@ -37,11 +37,11 @@ import type {
   InvalidateGraphQuery,
   SetRoutingPreferencesBody,
   SubmitBusFeedbackBody,
-} from "@types/bus";
+} from "../../types/bus";
 import type {
   NavigationRouteRequestBody,
   ParseNavigationTextRequestBody,
-} from "@types/navigation";
+} from "../../types/navigation";
 
 export const busApiKeys = {
   all: ["busApi"] as const,

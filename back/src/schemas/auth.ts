@@ -74,7 +74,7 @@ export const loginSchema = {
   }
 };
 
-export const promoteUserToDriverSchema = {
+export const changeUserRole = {
   security: [{ bearerAuth: [] }],
   body: {
     type: "object",
