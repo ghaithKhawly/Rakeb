@@ -1,215 +1,372 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Kinetic } from "@/constants/theme";
+import { HintBanner } from "@/components/ui/HintBanner";
+import { Collapsible } from "@/components/ui/collapsible";
 import { ThemedText } from "@/components/themed-text";
+import { SettingsTopBar } from "@/components/settings/SettingsTopBar";
+import { Kinetic, TransitTheme } from "@/constants/theme";
+import { useLanguage } from "@/hooks/LanguageContext";
 import {
   useRoutingPreferences,
   useSetRoutingPreferencesMutation,
 } from "@/hooks/useBusApi";
-import { useLanguage } from "@/hooks/LanguageContext";
-import { SettingsTopBar } from "@/components/settings/SettingsTopBar";
+import { hapticLight, hapticSelection, hapticSuccess } from "@/utils/haptics";
+import { goBackOrHome } from "@/utils/navigation";
 
-type PreferenceKey = "speed" | "crowding" | "price" | "transfer" | "walking";
-type OptionKey =
-  | "maxWalkingDistanceM"
-  | "maxTotalWalkingDistanceM"
-  | "maxWalkingNeighbors"
-  | "maxBusTransfers"
-  | "walkingSpeedMps";
+type RoutingProfile =
+  | "balanced"
+  | "fastest"
+  | "fewestTransfers"
+  | "lessWalking"
+  | "cheapest"
+  | "lessCrowded";
 
-type PreferenceState = Record<PreferenceKey, number>;
-type OptionState = Record<OptionKey, number>;
+type WalkingComfort = "low" | "medium" | "high";
+type TransferSetting = "none" | "one" | "two" | "flexible";
+type WalkingPace = "slow" | "normal" | "fast";
+type SearchBreadth = "compact" | "balanced" | "wide";
 
-const DEFAULT_PREFERENCES: PreferenceState = {
-  speed: 1,
-  crowding: 1,
-  price: 1,
-  transfer: 1,
-  walking: 1,
+const PROFILE_WEIGHTS: Record<
+  RoutingProfile,
+  { speed: number; crowding: number; price: number; transfer: number; walking: number }
+> = {
+  balanced: { speed: 1, crowding: 1, price: 1, transfer: 1, walking: 1 },
+  fastest: { speed: 2, crowding: 0.8, price: 0.8, transfer: 1.2, walking: 0.8 },
+  fewestTransfers: { speed: 1.1, crowding: 0.8, price: 0.8, transfer: 2, walking: 1.1 },
+  lessWalking: { speed: 1, crowding: 0.8, price: 0.8, transfer: 1.3, walking: 2 },
+  cheapest: { speed: 0.9, crowding: 0.8, price: 2, transfer: 1, walking: 1 },
+  lessCrowded: { speed: 1, crowding: 2, price: 0.8, transfer: 1, walking: 1 },
 };
 
-const DEFAULT_OPTIONS: OptionState = {
-  maxWalkingDistanceM: 1000,
-  maxTotalWalkingDistanceM: 2000,
-  maxWalkingNeighbors: 12,
-  maxBusTransfers: 5,
-  walkingSpeedMps: 1.25,
-};
+function normalizePreferenceWeights(weights: {
+  speed: number;
+  crowding: number;
+  price: number;
+  transfer: number;
+  walking: number;
+}) {
+  const sum =
+    Math.max(0, weights.speed) +
+    Math.max(0, weights.crowding) +
+    Math.max(0, weights.price) +
+    Math.max(0, weights.transfer) +
+    Math.max(0, weights.walking);
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  if (sum <= 0) {
+    return { speed: 0.2, crowding: 0.2, price: 0.2, transfer: 0.2, walking: 0.2 };
+  }
+
+  return {
+    speed: Math.max(0, weights.speed) / sum,
+    crowding: Math.max(0, weights.crowding) / sum,
+    price: Math.max(0, weights.price) / sum,
+    transfer: Math.max(0, weights.transfer) / sum,
+    walking: Math.max(0, weights.walking) / sum,
+  };
 }
 
-type PreferenceCardProps = {
+const WALKING_COMFORT_OPTIONS: Record<WalkingComfort, { maxWalkingDistanceM: number; maxTotalWalkingDistanceM: number }> = {
+  low: { maxWalkingDistanceM: 300, maxTotalWalkingDistanceM: 700 },
+  medium: { maxWalkingDistanceM: 800, maxTotalWalkingDistanceM: 1700 },
+  high: { maxWalkingDistanceM: 1500, maxTotalWalkingDistanceM: 3200 },
+};
+
+const TRANSFER_OPTIONS: Record<TransferSetting, number> = {
+  none: 0,
+  one: 1,
+  two: 2,
+  flexible: 4,
+};
+
+const WALKING_PACE_OPTIONS: Record<WalkingPace, number> = {
+  slow: 1.0,
+  normal: 1.25,
+  fast: 1.5,
+};
+
+const SEARCH_BREADTH_OPTIONS: Record<SearchBreadth, number> = {
+  compact: 8,
+  balanced: 12,
+  wide: 18,
+};
+
+const ROUTE_GOAL_OPTIONS: Array<{
+  value: RoutingProfile;
+  title: string;
+  subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  emphasis?: "primary" | "neutral";
-};
+}> = [
+  {
+    value: "balanced",
+    title: "Best balance",
+    subtitle: "Keep time, comfort, transfers, and price evenly weighted.",
+    icon: "sparkles-outline",
+  },
+  {
+    value: "fastest",
+    title: "Fastest route",
+    subtitle: "Prefer the shortest total travel time.",
+    icon: "flash-outline",
+  },
+  {
+    value: "fewestTransfers",
+    title: "Fewer transfers",
+    subtitle: "Favor routes with fewer bus changes.",
+    icon: "git-branch-outline",
+  },
+  {
+    value: "lessWalking",
+    title: "Less walking",
+    subtitle: "Prefer routes with shorter walks.",
+    icon: "walk-outline",
+  },
+  {
+    value: "cheapest",
+    title: "Cheapest trip",
+    subtitle: "Prefer lower-cost routes when possible.",
+    icon: "card-outline",
+  },
+  {
+    value: "lessCrowded",
+    title: "Less crowded",
+    subtitle: "Favor routes that avoid crowded segments.",
+    icon: "people-outline",
+  },
+];
 
-type OptionCardProps = {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  step: number;
-  hint?: string;
-  precision?: number;
-};
+const WALKING_COMFORT_CHOICES: Array<{
+  value: WalkingComfort;
+  title: string;
+  subtitle: string;
+}> = [
+  {
+    value: "low",
+    title: "Short walks",
+    subtitle: "Keep each walk short.",
+  },
+  {
+    value: "medium",
+    title: "Balanced",
+    subtitle: "Allow a middle amount of walking.",
+  },
+  {
+    value: "high",
+    title: "Longer walks",
+    subtitle: "Allow longer walks when they help the trip.",
+  },
+];
 
-function PreferenceCard({
-  icon,
-  label,
-  value,
-  onChange,
-  emphasis = "neutral",
-}: PreferenceCardProps) {
-  const normalizedValue = Number.isFinite(value) ? value : 0;
-  const [draft, setDraft] = useState(normalizedValue.toFixed(2));
+const TRANSFER_CHOICES: Array<{ value: TransferSetting; title: string; subtitle: string }> = [
+  { value: "none", title: "No transfers", subtitle: "Only direct bus routes." },
+  { value: "one", title: "Up to 1 transfer", subtitle: "Allow one bus change." },
+  { value: "two", title: "Up to 2 transfers", subtitle: "Allow two bus changes." },
+  { value: "flexible", title: "Flexible", subtitle: "Allow more changes if needed." },
+];
 
-  useEffect(() => {
-    setDraft(normalizedValue.toFixed(2));
-  }, [normalizedValue]);
+const WALKING_PACE_CHOICES: Array<{ value: WalkingPace; title: string; subtitle: string }> = [
+  { value: "slow", title: "Slow", subtitle: "Treat walking time as slower." },
+  { value: "normal", title: "Normal", subtitle: "Use a middle walking speed." },
+  { value: "fast", title: "Fast", subtitle: "Treat walking time as faster." },
+];
 
-  const commitDraft = () => {
-    const parsed = Number(draft.replace(",", ".").trim());
-    if (!Number.isFinite(parsed)) {
-      setDraft(normalizedValue.toFixed(2));
-      return;
+const SEARCH_BREADTH_CHOICES: Array<{
+  value: SearchBreadth;
+  title: string;
+  subtitle: string;
+}> = [
+  {
+    value: "compact",
+    title: "Compact",
+    subtitle: "Check fewer nearby options.",
+  },
+  {
+    value: "balanced",
+    title: "Balanced",
+    subtitle: "Use the default search depth.",
+  },
+  {
+    value: "wide",
+    title: "Wide",
+    subtitle: "Check more nearby options.",
+  },
+];
+
+function nearestProfile(weights: { speed: number; crowding: number; price: number; transfer: number; walking: number }): RoutingProfile {
+  const normalizedInput = normalizePreferenceWeights(weights);
+  const entries = Object.entries(PROFILE_WEIGHTS) as Array<[RoutingProfile, (typeof PROFILE_WEIGHTS)[RoutingProfile]]>;
+  let bestProfile: RoutingProfile = "balanced";
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const [profile, target] of entries) {
+    const normalizedTarget = normalizePreferenceWeights(target);
+    const score =
+      Math.abs(normalizedTarget.speed - normalizedInput.speed) +
+      Math.abs(normalizedTarget.crowding - normalizedInput.crowding) +
+      Math.abs(normalizedTarget.price - normalizedInput.price) +
+      Math.abs(normalizedTarget.transfer - normalizedInput.transfer) +
+      Math.abs(normalizedTarget.walking - normalizedInput.walking);
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestProfile = profile;
     }
+  }
 
-    onChange(parsed);
-  };
+  return bestProfile;
+}
 
+function deriveWalkingComfort(maxWalkingDistanceM: number): WalkingComfort {
+  if (maxWalkingDistanceM <= 450) return "low";
+  if (maxWalkingDistanceM <= 1100) return "medium";
+  return "high";
+}
+
+function deriveTransferSetting(maxBusTransfers: number): TransferSetting {
+  if (maxBusTransfers <= 0) return "none";
+  if (maxBusTransfers === 1) return "one";
+  if (maxBusTransfers === 2) return "two";
+  return "flexible";
+}
+
+function deriveWalkingPace(walkingSpeedMps: number): WalkingPace {
+  if (walkingSpeedMps <= 1.1) return "slow";
+  if (walkingSpeedMps >= 1.4) return "fast";
+  return "normal";
+}
+
+function deriveSearchBreadth(maxWalkingNeighbors: number): SearchBreadth {
+  if (maxWalkingNeighbors <= 9) return "compact";
+  if (maxWalkingNeighbors >= 15) return "wide";
+  return "balanced";
+}
+
+type SelectableCardProps = {
+  icon?: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle?: string;
+  selected: boolean;
+  isRTL: boolean;
+  onPress: () => void;
+};
+
+function SelectableCard({ icon, title, subtitle, selected, isRTL, onPress }: SelectableCardProps) {
   return (
-    <View
+    <TouchableOpacity
       style={[
-        styles.preferenceCard,
-        emphasis === "primary"
-          ? styles.preferenceCardPrimary
-          : styles.preferenceCardNeutral,
+        styles.goalCard,
+        selected && styles.goalCardSelected,
+        isRTL && styles.goalCardRtl,
       ]}
+      onPress={onPress}
+      activeOpacity={0.86}
     >
-      <View style={styles.preferenceHeader}>
-        <View style={styles.preferenceIconWrap}>
-          <Ionicons
-            name={icon}
-            size={18}
-            color={
-              emphasis === "primary"
-                ? Kinetic.primary
-                : Kinetic.onSurfaceVariant
-            }
-          />
+      <View style={[styles.goalCardRow, isRTL && styles.goalCardRowRtl]}>
+        {icon ? (
+          <View style={[styles.goalIconWrap, selected && styles.goalIconWrapSelected]}>
+            <Ionicons
+              name={icon}
+              size={18}
+              color={selected ? Kinetic.primary : Kinetic.onSurfaceVariant}
+            />
+          </View>
+        ) : null}
+
+        <View style={[styles.goalCopy, isRTL && styles.goalCopyRtl]}>
+          <ThemedText style={[styles.goalTitle, isRTL && styles.textRtl]}>{title}</ThemedText>
+          {subtitle ? (
+            <ThemedText style={[styles.goalSubtitle, isRTL && styles.textRtl]}>
+              {subtitle}
+            </ThemedText>
+          ) : null}
         </View>
-        <ThemedText style={styles.preferenceValue}>
-          {normalizedValue.toFixed(2)}
-        </ThemedText>
-      </View>
-      <ThemedText style={styles.preferenceLabel}>{label}</ThemedText>
-      <View style={styles.preferenceAdjustRow}>
-        <TouchableOpacity
-          style={styles.stepButton}
-          onPress={() => onChange(normalizedValue - 0.1)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="remove" size={16} color={Kinetic.primary} />
-        </TouchableOpacity>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          onBlur={commitDraft}
-          onSubmitEditing={commitDraft}
-          keyboardType="decimal-pad"
-          returnKeyType="done"
-          blurOnSubmit
-          style={styles.numericInput}
-          textAlign="center"
-          selectionColor={Kinetic.primary}
-          placeholder="0.00"
-          placeholderTextColor={Kinetic.onSurfaceVariant}
+
+        <Ionicons
+          name={selected ? "checkmark-circle" : "ellipse-outline"}
+          size={19}
+          color={selected ? Kinetic.primary : Kinetic.onSurfaceVariant}
         />
-        <TouchableOpacity
-          style={styles.stepButton}
-          onPress={() => onChange(normalizedValue + 0.1)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={16} color={Kinetic.primary} />
-        </TouchableOpacity>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+type ChipProps = {
+  title: string;
+  subtitle?: string;
+  selected: boolean;
+  isRTL: boolean;
+  onPress: () => void;
+};
+
+function Chip({ title, subtitle, selected, isRTL, onPress }: ChipProps) {
+  return (
+    <TouchableOpacity
+      style={[styles.chip, selected && styles.chipSelected, isRTL && styles.chipRtl]}
+      onPress={onPress}
+      activeOpacity={0.86}
+    >
+      <ThemedText style={[styles.chipTitle, selected && styles.chipTitleSelected, isRTL && styles.textRtl]}>
+        {title}
+      </ThemedText>
+      {subtitle ? (
+        <ThemedText
+          style={[styles.chipSubtitle, selected && styles.chipSubtitleSelected, isRTL && styles.textRtl]}
+          numberOfLines={2}
+        >
+          {subtitle}
+        </ThemedText>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
+type PreferenceGroupProps = {
+  title: string;
+  subtitle: string;
+  isRTL: boolean;
+  children: React.ReactNode;
+};
+
+function PreferenceGroup({ title, subtitle, isRTL, children }: PreferenceGroupProps) {
+  return (
+    <View style={styles.group}>
+      <View style={[styles.groupHeader, isRTL && styles.groupHeaderRtl]}>
+        <ThemedText style={[styles.groupTitle, isRTL && styles.textRtl]}>{title}</ThemedText>
+        <ThemedText style={[styles.groupSubtitle, isRTL && styles.textRtl]}>{subtitle}</ThemedText>
+      </View>
+      <View style={styles.groupContent}>{children}</View>
     </View>
   );
 }
 
-function OptionCard({
-  label,
-  value,
-  onChange,
-  step,
-  hint,
-  precision = 0,
-}: OptionCardProps) {
-  const [draft, setDraft] = useState(value.toFixed(precision));
+type SectionHeaderProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  isRTL: boolean;
+};
 
-  useEffect(() => {
-    setDraft(value.toFixed(precision));
-  }, [precision, value]);
-
-  const commitDraft = () => {
-    const parsed = Number(draft.replace(",", ".").trim());
-    if (!Number.isFinite(parsed)) {
-      setDraft(value.toFixed(precision));
-      return;
-    }
-
-    onChange(parsed);
-  };
-
+function SectionHeader({ icon, title, subtitle, isRTL }: SectionHeaderProps) {
   return (
-    <View style={styles.optionCard}>
-      <ThemedText style={styles.optionLabel}>{label}</ThemedText>
-      {hint ? <ThemedText style={styles.optionHint}>{hint}</ThemedText> : null}
-      <View style={styles.optionValueRow}>
-        <TouchableOpacity
-          style={styles.optionStepButton}
-          onPress={() => onChange(value - step)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="remove" size={16} color={Kinetic.primary} />
-        </TouchableOpacity>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          onBlur={commitDraft}
-          onSubmitEditing={commitDraft}
-          keyboardType={precision > 0 ? "decimal-pad" : "number-pad"}
-          returnKeyType="done"
-          blurOnSubmit
-          style={styles.numericInput}
-          textAlign="center"
-          selectionColor={Kinetic.primary}
-          placeholderTextColor={Kinetic.onSurfaceVariant}
-        />
-        <TouchableOpacity
-          style={styles.optionStepButton}
-          onPress={() => onChange(value + step)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={16} color={Kinetic.primary} />
-        </TouchableOpacity>
+    <View style={[styles.sectionHeader, isRTL && styles.sectionHeaderRtl]}>
+      <View style={styles.sectionIconWrap}>
+        <Ionicons name={icon} size={18} color={Kinetic.primary} />
+      </View>
+      <View style={[styles.sectionCopy, isRTL && styles.sectionCopyRtl]}>
+        <ThemedText style={[styles.sectionTitle, isRTL && styles.textRtl]}>{title}</ThemedText>
+        <ThemedText style={[styles.sectionSubtitle, isRTL && styles.textRtl]}>{subtitle}</ThemedText>
       </View>
     </View>
   );
@@ -223,119 +380,93 @@ export default function PreferencesScreen() {
   const routingPreferencesQuery = useRoutingPreferences();
   const setRoutingPreferencesMutation = useSetRoutingPreferencesMutation();
 
-  const [preferences, setPreferences] =
-    useState<PreferenceState>(DEFAULT_PREFERENCES);
-  const [options, setOptions] = useState<OptionState>(DEFAULT_OPTIONS);
+  const [profile, setProfile] = useState<RoutingProfile>("balanced");
+  const [walkingComfort, setWalkingComfort] = useState<WalkingComfort>("medium");
+  const [transferSetting, setTransferSetting] = useState<TransferSetting>("flexible");
+  const [walkingPace, setWalkingPace] = useState<WalkingPace>("normal");
+  const [searchBreadth, setSearchBreadth] = useState<SearchBreadth>("balanced");
 
   useEffect(() => {
     const data = routingPreferencesQuery.data;
-    if (!data) {
-      return;
-    }
+    if (!data) return;
 
-    setPreferences({
-      speed: Number(data.preferences.speed.toFixed(2)),
-      crowding: Number(data.preferences.crowding.toFixed(2)),
-      price: Number(data.preferences.price.toFixed(2)),
-      transfer: Number(data.preferences.transfer.toFixed(2)),
-      walking: Number(data.preferences.walking.toFixed(2)),
-    });
-
-    setOptions({
-      maxWalkingDistanceM: data.options.maxWalkingDistanceM,
-      maxTotalWalkingDistanceM: data.options.maxTotalWalkingDistanceM,
-      maxWalkingNeighbors: data.options.maxWalkingNeighbors,
-      maxBusTransfers: data.options.maxBusTransfers,
-      walkingSpeedMps: Number(data.options.walkingSpeedMps.toFixed(1)),
-    });
+    setProfile(nearestProfile(data.preferences));
+    setWalkingComfort(deriveWalkingComfort(data.options.maxWalkingDistanceM));
+    setTransferSetting(deriveTransferSetting(data.options.maxBusTransfers));
+    setWalkingPace(deriveWalkingPace(data.options.walkingSpeedMps));
+    setSearchBreadth(deriveSearchBreadth(data.options.maxWalkingNeighbors));
   }, [routingPreferencesQuery.data]);
 
-  const updatePreference = (key: PreferenceKey) => (value: number) => {
-    setPreferences((prev) => ({
-      ...prev,
-      [key]: Math.max(0, Number(value.toFixed(2))),
-    }));
-  };
+  const payload = useMemo(() => {
+    const selectedWeights = PROFILE_WEIGHTS[profile];
+    const selectedWalking = WALKING_COMFORT_OPTIONS[walkingComfort];
 
-  const updateOption = (key: OptionKey) => (value: number) => {
-    setOptions((prev) => {
-      if (key === "maxWalkingDistanceM") {
-        const maxWalkingDistanceM = Math.max(50, Math.round(value));
-        return {
-          ...prev,
-          maxWalkingDistanceM,
-          maxTotalWalkingDistanceM: Math.max(
-            prev.maxTotalWalkingDistanceM,
-            maxWalkingDistanceM,
-          ),
-        };
-      }
-
-      if (key === "maxTotalWalkingDistanceM") {
-        const maxTotalWalkingDistanceM = clamp(Math.round(value), 0, 10000);
-        return {
-          ...prev,
-          maxTotalWalkingDistanceM: Math.max(
-            maxTotalWalkingDistanceM,
-            prev.maxWalkingDistanceM,
-          ),
-        };
-      }
-
-      if (key === "maxWalkingNeighbors") {
-        return {
-          ...prev,
-          maxWalkingNeighbors: clamp(Math.round(value), 1, 100),
-        };
-      }
-
-      if (key === "maxBusTransfers") {
-        return {
-          ...prev,
-          maxBusTransfers: clamp(Math.round(value), 0, 10),
-        };
-      }
-
-      return {
-        ...prev,
-        walkingSpeedMps: clamp(Number(value.toFixed(1)), 0.4, 3.5),
-      };
-    });
-  };
-
-  const applyPreferences = async () => {
-    const payload = {
+    return {
       preferences: {
-        speed: preferences.speed,
-        crowding: preferences.crowding,
-        price: preferences.price,
-        transfer: preferences.transfer,
-        walking: preferences.walking,
+        speed: selectedWeights.speed,
+        crowding: selectedWeights.crowding,
+        price: selectedWeights.price,
+        transfer: selectedWeights.transfer,
+        walking: selectedWeights.walking,
       },
       options: {
-        maxWalkingDistanceM: options.maxWalkingDistanceM,
-        maxTotalWalkingDistanceM: options.maxTotalWalkingDistanceM,
-        maxWalkingNeighbors: options.maxWalkingNeighbors,
-        maxBusTransfers: options.maxBusTransfers,
-        walkingSpeedMps: options.walkingSpeedMps,
+        maxWalkingDistanceM: selectedWalking.maxWalkingDistanceM,
+        maxTotalWalkingDistanceM: selectedWalking.maxTotalWalkingDistanceM,
+        maxWalkingNeighbors: SEARCH_BREADTH_OPTIONS[searchBreadth],
+        maxBusTransfers: TRANSFER_OPTIONS[transferSetting],
+        walkingSpeedMps: WALKING_PACE_OPTIONS[walkingPace],
       },
     };
-
-    if (__DEV__) {
-      console.log("[Preferences] save payload", payload);
-    }
-
-    const response = await setRoutingPreferencesMutation.mutateAsync(payload);
-
-    if (__DEV__) {
-      console.log("[Preferences] save response", response);
-    }
-
-    router.back();
-  };
+  }, [profile, searchBreadth, transferSetting, walkingComfort, walkingPace]);
 
   const isLoading = routingPreferencesQuery.isLoading;
   const isSaving = setRoutingPreferencesMutation.isPending;
+
+  const selectProfile = (value: RoutingProfile) => {
+    if (profile !== value) {
+      hapticSelection();
+      setProfile(value);
+    }
+  };
+
+  const selectWalkingComfort = (value: WalkingComfort) => {
+    if (walkingComfort !== value) {
+      hapticSelection();
+      setWalkingComfort(value);
+    }
+  };
+
+  const selectTransferSetting = (value: TransferSetting) => {
+    if (transferSetting !== value) {
+      hapticSelection();
+      setTransferSetting(value);
+    }
+  };
+
+  const selectWalkingPace = (value: WalkingPace) => {
+    if (walkingPace !== value) {
+      hapticSelection();
+      setWalkingPace(value);
+    }
+  };
+
+  const selectSearchBreadth = (value: SearchBreadth) => {
+    if (searchBreadth !== value) {
+      hapticSelection();
+      setSearchBreadth(value);
+    }
+  };
+
+  const savePreferences = async () => {
+    hapticLight();
+    try {
+      await setRoutingPreferencesMutation.mutateAsync(payload);
+      hapticSuccess();
+      goBackOrHome(router);
+    } catch {
+      // The mutation state already drives the error banner.
+    }
+  };
 
   return (
     <View style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
@@ -351,128 +482,167 @@ export default function PreferencesScreen() {
             styles.content,
             {
               paddingTop: Math.max(insets.top, 10) + 12,
-              paddingBottom: Math.max(insets.bottom, 20) + 20,
+              paddingBottom: Math.max(insets.bottom, 20) + 22,
             },
           ]}
         >
           <SettingsTopBar
             title={t("preferences.title")}
-            onBack={() => router.back()}
+            onBack={() => goBackOrHome(router)}
+            isRTL={isRTL}
           />
 
           <View style={styles.heroBlock}>
-            <ThemedText style={styles.heroLabel}>
-              {t("preferences.heroLabel")}
-            </ThemedText>
-            <ThemedText style={styles.heroTitle}>
-              {t("preferences.heroTitle")}
-            </ThemedText>
-            <ThemedText style={styles.heroSubtitle}>
-              {t("preferences.heroSubtitle")}
+            <ThemedText style={[styles.heroTitle, isRTL && styles.textRtl]}>Trip options</ThemedText>
+            <ThemedText style={[styles.heroSubtitle, isRTL && styles.textRtl]}>
+              Choose the tradeoffs you want the router to favor.
             </ThemedText>
           </View>
 
+          <HintBanner
+            title="How this works"
+            message="Pick one route goal, then tune comfort and advanced search settings if you need more control."
+          />
+
           {isLoading ? (
-            <View style={styles.loadingState}>
+            <View style={[styles.loadingState, isRTL && styles.loadingStateRtl]}>
               <ActivityIndicator size="small" color={Kinetic.primary} />
-              <ThemedText style={styles.loadingText}>
-                {t("preferences.loading")}
+              <ThemedText style={[styles.loadingText, isRTL && styles.textRtl]}>
+                Loading saved options...
               </ThemedText>
             </View>
           ) : null}
 
-          <PreferenceCard
-            icon="flash"
-            label={t("preferences.speed")}
-            value={preferences.speed}
-            onChange={updatePreference("speed")}
-            emphasis="primary"
-          />
-          <PreferenceCard
-            icon="people"
-            label={t("preferences.crowding")}
-            value={preferences.crowding}
-            onChange={updatePreference("crowding")}
-          />
-          <PreferenceCard
-            icon="card"
-            label={t("preferences.price")}
-            value={preferences.price}
-            onChange={updatePreference("price")}
-            emphasis="primary"
-          />
-          <PreferenceCard
-            icon="git-branch"
-            label={t("preferences.transfer")}
-            value={preferences.transfer}
-            onChange={updatePreference("transfer")}
-          />
-          <PreferenceCard
-            icon="walk"
-            label={t("preferences.walking")}
-            value={preferences.walking}
-            onChange={updatePreference("walking")}
-            emphasis="primary"
-          />
+          <View style={styles.sectionCard}>
+            <SectionHeader
+              icon="options-outline"
+              title="Route goal"
+              subtitle="Choose the main thing the router should favor."
+              isRTL={isRTL}
+            />
+            <View style={[styles.goalGrid, isRTL && styles.goalGridRtl]}>
+              {ROUTE_GOAL_OPTIONS.map((option) => (
+                <SelectableCard
+                  key={option.value}
+                  icon={option.icon}
+                  title={option.title}
+                  subtitle={option.subtitle}
+                  selected={profile === option.value}
+                  isRTL={isRTL}
+                  onPress={() => selectProfile(option.value)}
+                />
+              ))}
+            </View>
+          </View>
 
-          <ThemedText style={styles.sectionLabel}>
-            {t("preferences.options.section")}
-          </ThemedText>
-          <OptionCard
-            label={t("preferences.options.maxWalkingDistance")}
-            value={options.maxWalkingDistanceM}
-            onChange={updateOption("maxWalkingDistanceM")}
-            step={50}
-            hint={t("preferences.hint.min50")}
-          />
-          <OptionCard
-            label={t("preferences.options.maxTotalWalkingDistance")}
-            value={options.maxTotalWalkingDistanceM}
-            onChange={updateOption("maxTotalWalkingDistanceM")}
-            step={100}
-            hint={t("preferences.hint.rangeWalkTotal")}
-          />
-          <OptionCard
-            label={t("preferences.options.maxWalkingNeighbors")}
-            value={options.maxWalkingNeighbors}
-            onChange={updateOption("maxWalkingNeighbors")}
-            step={1}
-            hint={t("preferences.hint.rangeNeighbors")}
-          />
-          <OptionCard
-            label={t("preferences.options.maxBusTransfers")}
-            value={options.maxBusTransfers}
-            onChange={updateOption("maxBusTransfers")}
-            step={1}
-            hint={t("preferences.hint.rangeTransfers")}
-          />
-          <OptionCard
-            label={t("preferences.options.walkingSpeed")}
-            value={options.walkingSpeedMps}
-            onChange={updateOption("walkingSpeedMps")}
-            step={0.1}
-            hint={t("preferences.hint.rangeSpeed")}
-            precision={1}
-          />
+          <View style={styles.sectionCard}>
+            <SectionHeader
+              icon="walk-outline"
+              title="Comfort and transfer"
+              subtitle="Set how much walking and how many changes feel okay."
+              isRTL={isRTL}
+            />
+
+            <PreferenceGroup
+              title="Walking comfort"
+              subtitle="How much walking feels acceptable."
+              isRTL={isRTL}
+            >
+              <View style={styles.chipWrap}>
+                {WALKING_COMFORT_CHOICES.map((option) => (
+                  <Chip
+                    key={option.value}
+                    title={option.title}
+                    subtitle={option.subtitle}
+                    selected={walkingComfort === option.value}
+                    isRTL={isRTL}
+                    onPress={() => selectWalkingComfort(option.value)}
+                  />
+                ))}
+              </View>
+            </PreferenceGroup>
+
+            <PreferenceGroup
+              title="Transfers"
+              subtitle="How many bus changes you are comfortable with."
+              isRTL={isRTL}
+            >
+              <View style={styles.chipWrap}>
+                {TRANSFER_CHOICES.map((option) => (
+                  <Chip
+                    key={option.value}
+                    title={option.title}
+                    subtitle={option.subtitle}
+                    selected={transferSetting === option.value}
+                    isRTL={isRTL}
+                    onPress={() => selectTransferSetting(option.value)}
+                  />
+                ))}
+              </View>
+            </PreferenceGroup>
+          </View>
+
+          <Collapsible
+            title="Advanced"
+            subtitle="More technical search controls are tucked away here."
+            icon="construct-outline"
+            isRTL={isRTL}
+          >
+            <PreferenceGroup
+              title="Walking pace"
+              subtitle="How fast the route should count walking time."
+              isRTL={isRTL}
+            >
+              <View style={styles.chipWrap}>
+                {WALKING_PACE_CHOICES.map((option) => (
+                  <Chip
+                    key={option.value}
+                    title={option.title}
+                    subtitle={option.subtitle}
+                    selected={walkingPace === option.value}
+                    isRTL={isRTL}
+                    onPress={() => selectWalkingPace(option.value)}
+                  />
+                ))}
+              </View>
+            </PreferenceGroup>
+
+            <PreferenceGroup
+              title="Search breadth"
+              subtitle="How many nearby stops the router should explore."
+              isRTL={isRTL}
+            >
+              <View style={styles.chipWrap}>
+                {SEARCH_BREADTH_CHOICES.map((option) => (
+                  <Chip
+                    key={option.value}
+                    title={option.title}
+                    subtitle={option.subtitle}
+                    selected={searchBreadth === option.value}
+                    isRTL={isRTL}
+                    onPress={() => selectSearchBreadth(option.value)}
+                  />
+                ))}
+              </View>
+            </PreferenceGroup>
+          </Collapsible>
 
           {setRoutingPreferencesMutation.isError ? (
-            <ThemedText style={styles.errorText}>
-              {t("preferences.saveError")}
+            <ThemedText style={[styles.errorText, isRTL && styles.textRtl]}>
+              Failed to save preferences. Please try again.
             </ThemedText>
           ) : null}
 
           <TouchableOpacity
             style={[styles.applyButton, isSaving && styles.applyButtonDisabled]}
-            onPress={() => void applyPreferences()}
+            onPress={() => void savePreferences()}
             activeOpacity={0.9}
             disabled={isSaving}
           >
             {isSaving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={Kinetic.state.onPrimary} />
             ) : (
-              <ThemedText style={styles.applyButtonText}>
-                {t("preferences.save")}
-              </ThemedText>
+              <ThemedText style={styles.applyButtonText}>{t("preferences.save")}</ThemedText>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -482,185 +652,152 @@ export default function PreferencesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Kinetic.surfaceLow,
-  },
-  safeAreaRtl: {
-    direction: "rtl",
-  },
-  keyboardAvoiding: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 22,
-    gap: 16,
-  },
-  heroBlock: {
-    gap: 4,
-    marginBottom: 4,
-  },
-  heroLabel: {
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    color: Kinetic.primary,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  heroTitle: {
-    color: Kinetic.onSurface,
-    fontSize: 40,
-    lineHeight: 42,
-    fontWeight: "900",
-    letterSpacing: -1.2,
-  },
-  heroSubtitle: {
-    color: Kinetic.onSurfaceVariant,
-    fontSize: 16,
-    fontWeight: "500",
-    maxWidth: 320,
-  },
-  loadingState: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  loadingText: {
-    color: Kinetic.onSurfaceVariant,
-    fontSize: 12,
-  },
-  preferenceCard: {
+  safeArea: { flex: 1, backgroundColor: Kinetic.surfaceLow },
+  safeAreaRtl: { direction: "rtl" },
+  keyboardAvoiding: { flex: 1 },
+  content: { paddingHorizontal: 18, gap: 14 },
+  heroBlock: { gap: 4, marginBottom: 2 },
+  heroTitle: { color: Kinetic.onSurface, fontSize: 34, fontWeight: "900", letterSpacing: -0.8 },
+  heroSubtitle: { color: Kinetic.onSurfaceVariant, fontSize: 14, lineHeight: 20 },
+  loadingState: { flexDirection: "row", alignItems: "center", gap: 8 },
+  loadingStateRtl: { flexDirection: "row-reverse" },
+  loadingText: { color: Kinetic.onSurfaceVariant, fontSize: 12 },
+  sectionCard: {
     borderRadius: 22,
-    padding: 18,
-    gap: 12,
-  },
-  preferenceCardPrimary: {
-    backgroundColor: "#FFFFFF",
-  },
-  preferenceCardNeutral: {
-    backgroundColor: Kinetic.surfaceContainer,
-  },
-  preferenceHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  preferenceIconWrap: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: "#dde1ff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  preferenceValue: {
-    color: "#b8c3e3",
-    fontSize: 44,
-    lineHeight: 40,
-    fontWeight: "900",
-    letterSpacing: -1,
-  },
-  preferenceLabel: {
-    textTransform: "uppercase",
-    letterSpacing: 1.4,
-    fontSize: 11,
-    color: Kinetic.onSurfaceVariant,
-    fontWeight: "700",
-  },
-  preferenceAdjustRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  stepButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sectionLabel: {
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    color: Kinetic.onSurfaceVariant,
-    fontWeight: "800",
-    fontSize: 11,
-    marginTop: 8,
-  },
-  optionCard: {
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  sectionHeaderRtl: { flexDirection: "row-reverse" },
+  sectionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.cardBgActive,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionCopy: { flex: 1, gap: 2 },
+  sectionCopyRtl: { alignItems: "flex-end" },
+  sectionTitle: { color: Kinetic.onSurface, fontSize: 20, fontWeight: "800", lineHeight: 24 },
+  sectionSubtitle: { color: Kinetic.onSurfaceVariant, fontSize: 13, lineHeight: 18 },
+  goalGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  goalGridRtl: {
+    flexDirection: "row-reverse",
+  },
+  goalCard: {
+    width: "48%",
+    minHeight: 112,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 12,
+  },
+  goalCardSelected: {
+    borderColor: Kinetic.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  goalCardRtl: {
+    alignSelf: "stretch",
+  },
+  goalCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  goalCardRowRtl: {
+    flexDirection: "row-reverse",
+  },
+  goalIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.bg,
+  },
+  goalIconWrapSelected: {
+    backgroundColor: Kinetic.state.onPrimary,
+  },
+  goalCopy: { flex: 1, gap: 2 },
+  goalCopyRtl: { alignItems: "flex-end" },
+  goalTitle: { color: Kinetic.onSurface, fontSize: 16, fontWeight: "800", lineHeight: 20 },
+  goalSubtitle: { color: Kinetic.onSurfaceVariant, fontSize: 12, lineHeight: 16 },
+  group: { gap: 8 },
+  groupHeader: { gap: 2 },
+  groupHeaderRtl: { alignItems: "flex-end" },
+  groupTitle: { color: Kinetic.onSurface, fontSize: 14, fontWeight: "800" },
+  groupSubtitle: { color: Kinetic.onSurfaceVariant, fontSize: 12, lineHeight: 16 },
+  groupContent: { gap: 10 },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
-  optionLabel: {
+  chip: {
+    flexGrow: 1,
+    flexBasis: "31%",
+    minHeight: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    justifyContent: "center",
+    gap: 3,
+  },
+  chipRtl: {
+    alignItems: "flex-end",
+  },
+  chipSelected: {
+    borderColor: Kinetic.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  chipTitle: {
     color: Kinetic.onSurface,
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
+    lineHeight: 17,
   },
-  optionHint: {
+  chipTitleSelected: {
+    color: Kinetic.onSurface,
+  },
+  chipSubtitle: {
     color: Kinetic.onSurfaceVariant,
     fontSize: 11,
-    fontWeight: "600",
+    lineHeight: 14,
   },
-  optionValueRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  chipSubtitleSelected: {
+    color: Kinetic.onSurfaceVariant,
   },
-  optionStepButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: Kinetic.surfaceContainer,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  optionValue: {
-    color: Kinetic.onSurface,
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  numericInput: {
-    minWidth: 96,
-    height: 36,
-    lineHeight: 18,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Kinetic.outlineVariant,
-    backgroundColor: "#FFFFFF",
-    color: Kinetic.onSurface,
-    fontSize: 15,
-    fontWeight: "700",
-    paddingHorizontal: 8,
-    paddingVertical: 0,
-    textAlignVertical: "center",
-    includeFontPadding: false,
-  },
-  errorText: {
-    color: "#BA1A1A",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  errorText: { color: Kinetic.state.error, fontSize: 12, fontWeight: "600" },
   applyButton: {
     marginTop: 6,
-    height: 58,
-    borderRadius: 20,
+    minHeight: 56,
+    borderRadius: 18,
     backgroundColor: Kinetic.primary,
     alignItems: "center",
     justifyContent: "center",
   },
-  applyButtonDisabled: {
-    opacity: 0.7,
-  },
+  applyButtonDisabled: { opacity: 0.7 },
   applyButtonText: {
-    color: "#FFFFFF",
+    color: Kinetic.state.onPrimary,
     fontWeight: "800",
-    fontSize: 22,
-    lineHeight: 24,
-    letterSpacing: -0.3,
+    fontSize: 18,
+    letterSpacing: -0.2,
   },
+  textRtl: { textAlign: "right" },
 });

@@ -1,66 +1,51 @@
-import React, { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Keyboard,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import React from "react";
+import { StyleSheet, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { Colors } from "@/constants/theme";
+import { Colors, TransitTheme } from "@/constants/theme";
+import { ThemedText } from "@/components/themed-text";
 import { useLanguage } from "@/hooks/LanguageContext";
+import { hapticSelection } from "@/utils/haptics";
 
 type MapSearchControlProps = {
   topInset: number;
-  isSearching: boolean;
-  onSearch: (query: string) => Promise<void> | void;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  onSearchSubmit: () => Promise<void> | void;
+  onOpenOriginMenu: () => void;
+  onPanelAnchorLayout?: (layout: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
+  onFocusDestinationOnMap?: () => void;
+  onSwapLocations?: () => void;
+  onUseMapPin?: () => void;
+  startLabel?: string;
+  destinationLabel?: string;
 };
 
 export function MapSearchControl({
   topInset,
-  isSearching,
-  onSearch,
+  searchQuery,
+  onSearchQueryChange,
+  onSearchSubmit,
+  onOpenOriginMenu,
+  onPanelAnchorLayout,
+  onFocusDestinationOnMap,
+  onSwapLocations,
+  onUseMapPin,
+  startLabel,
+  destinationLabel,
 }: MapSearchControlProps) {
   const { isRTL, t } = useLanguage();
-  const searchInputRef = useRef<TextInput>(null);
-  const searchAnim = useRef(new Animated.Value(0)).current;
-
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const searchWidth = searchAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 260],
-  });
-
-  const toggleSearch = () => {
-    const nextOpen = !isSearchOpen;
-    setIsSearchOpen(nextOpen);
-
-    Animated.timing(searchAnim, {
-      toValue: nextOpen ? 1 : 0,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start(() => {
-      if (nextOpen) {
-        searchInputRef.current?.focus();
-      } else {
-        Keyboard.dismiss();
-      }
-    });
-  };
 
   const submitSearch = () => {
-    const query = searchQuery.trim();
-    if (!query) {
+    if (!searchQuery.trim()) {
       return;
     }
-    void onSearch(query);
+    void onSearchSubmit();
   };
 
   return (
@@ -71,53 +56,83 @@ export function MapSearchControl({
         isRTL ? styles.searchOverlayRtl : styles.searchOverlayLtr,
       ]}
     >
-      <TouchableOpacity
-        style={styles.searchIconButton}
-        onPress={toggleSearch}
-        activeOpacity={0.85}
+      <View
+        style={styles.summaryWrap}
+        onLayout={(event) => {
+          const { x, y, width, height } = event.nativeEvent.layout;
+          onPanelAnchorLayout?.({ x, y, width, height });
+        }}
       >
-        <Ionicons
-          name={isSearchOpen ? "close" : "search"}
-          size={18}
-          color={Colors.dark.text}
-        />
-      </TouchableOpacity>
+        <View style={styles.summaryRows}>
+          <TouchableOpacity
+            style={styles.summaryRow}
+            onPress={() => {
+              hapticSelection();
+              onOpenOriginMenu();
+            }}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="ellipse-outline" size={14} color="#60A5FA" />
+            <ThemedText numberOfLines={1} style={styles.summaryText}>
+              {startLabel ?? t("map.startFallback")}
+            </ThemedText>
+          </TouchableOpacity>
 
-      <Animated.View
-        style={[
-          styles.searchBarWrap,
-          {
-            width: searchWidth,
-            opacity: searchAnim,
-          },
-        ]}
-      >
-        <TextInput
-          ref={searchInputRef}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={t("search.placeholder")}
-          placeholderTextColor={Colors.dark.icon}
-          style={styles.searchInput}
-          returnKeyType="search"
-          onSubmitEditing={submitSearch}
-        />
-        <TouchableOpacity
-          style={styles.searchGoButton}
-          onPress={submitSearch}
-          disabled={isSearching}
-        >
-          {isSearching ? (
-            <ActivityIndicator size="small" color={Colors.dark.primary} />
-          ) : (
-            <Ionicons
-              name="arrow-forward"
-              size={16}
-              color={Colors.dark.primary}
+          <View style={styles.summaryDivider} />
+
+          <View style={styles.destinationRow}>
+            <Ionicons name="location-outline" size={15} color="#EF4444" />
+            <TextInput
+              value={searchQuery}
+              onChangeText={onSearchQueryChange}
+              onFocus={onFocusDestinationOnMap}
+              onSubmitEditing={submitSearch}
+              placeholder={destinationLabel ?? t("map.destinationFallback")}
+              placeholderTextColor={TransitTheme.map.overlaySubtext}
+              style={styles.destinationInput}
+              returnKeyType="search"
+              autoCapitalize="words"
+              autoCorrect={false}
+              selectionColor={Colors.dark.primary}
+              cursorColor={Colors.dark.primary}
             />
-          )}
+            <TouchableOpacity
+              style={styles.searchButton}
+              onPress={submitSearch}
+              disabled={!searchQuery.trim()}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name="search"
+                size={15}
+                color={searchQuery.trim() ? Colors.dark.primary : TransitTheme.panel.caption}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pinButton}
+              onPress={() => {
+                hapticSelection();
+                onUseMapPin?.();
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="pin-outline" size={15} color={Colors.dark.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.summaryActions}
+          onPress={() => {
+            hapticSelection();
+            onSwapLocations?.();
+          }}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="swap-vertical" size={16} color={TransitTheme.panel.caption} />
         </TouchableOpacity>
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -125,52 +140,90 @@ export function MapSearchControl({
 const styles = StyleSheet.create({
   searchOverlay: {
     position: "absolute",
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     zIndex: 20,
   },
   searchOverlayLtr: {
     left: 12,
+    right: 12,
   },
   searchOverlayRtl: {
     right: 12,
-    flexDirection: "row-reverse",
+    left: 12,
   },
-  searchIconButton: {
-    width: 40,
-    height: 40,
+  summaryWrap: {
+    minHeight: 92,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: Colors.dark.border,
-    backgroundColor: Colors.dark.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  searchBarWrap: {
-    marginLeft: 8,
-    marginTop: 8,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    backgroundColor: Colors.dark.surface,
-    paddingLeft: 12,
-    paddingRight: 8,
+    borderColor: TransitTheme.map.overlayBorder,
+    backgroundColor: TransitTheme.map.overlayBg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
-    overflow: "hidden",
+    gap: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  searchInput: {
+  summaryRows: {
     flex: 1,
-    color: Colors.dark.text,
-    fontSize: 13,
+    gap: 10,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 28,
+  },
+  destinationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 30,
+  },
+  destinationInput: {
+    flex: 1,
+    color: TransitTheme.map.overlayText,
+    fontSize: 14,
+    fontWeight: "500",
     paddingVertical: 0,
   },
-  searchGoButton: {
+  searchButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
+  },
+  pinButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
+  },
+  summaryDivider: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(148, 163, 184, 0.35)",
+  },
+  summaryText: {
+    flex: 1,
+    color: TransitTheme.map.overlayText,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  summaryActions: {
+    width: 30,
+    height: 36,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
   },
 });

@@ -4,6 +4,7 @@ import { StyleSheet, TouchableOpacity, View } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
 import { Kinetic } from "@/constants/theme";
+import { hapticSelection } from "@/utils/haptics";
 
 type SettingsActionCardProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -24,7 +25,10 @@ export function SettingsActionCard({
     <TouchableOpacity
       style={styles.card}
       activeOpacity={0.85}
-      onPress={onPress}
+      onPress={() => {
+        hapticSelection();
+        onPress();
+      }}
     >
       <View style={styles.cardLeft}>
         <View style={styles.cardIconWrap}>

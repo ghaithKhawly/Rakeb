@@ -34,15 +34,22 @@ export const Colors = {
 };
 
 export const Kinetic = {
-  surfaceLow: "#F4F3F6",
-  surfaceContainer: "#EEEDF0",
-  surfaceContainerHigh: "#E8E8EB",
-  surfaceContainerHighest: "#E3E2E5",
+  surfaceLow: "#EDF3FF",
+  surfaceContainer: "#FFFFFF",
+  surfaceContainerHigh: "#E2ECFF",
+  surfaceContainerHighest: "#CBDBFF",
   onSurface: "#1A1C1E",
-  onSurfaceVariant: "#434656",
+  onSurfaceVariant: "#3A4761",
   primary: "#003EC7",
   primaryContainer: "#0052FF",
   tertiary: "#833700",
+  state: {
+    error: "#C92A2A",
+    danger: "#EF4444",
+    success: "#16A34A",
+    info: "#60A5FA",
+    onPrimary: "#FFFFFF",
+  },
   outlineVariant: "#C3C5D9",
   spacing: {
     xs: 6,
@@ -56,6 +63,36 @@ export const Kinetic = {
     lg: 16,
     xl: 24,
     full: 999,
+  },
+};
+
+export const TransitTheme = {
+  map: {
+    overlayBg: "rgba(252, 253, 255, 0.98)",
+    overlayBorder: "#B9C8E8",
+    overlayText: "#111827",
+    overlaySubtext: "#6B7280",
+    fabBg: "#FFFFFF",
+    fabActiveBg: "#DDE8FF",
+    fabAccentBg: "#003EC7",
+  },
+  panel: {
+    bg: "#F2F6FF",
+    cardBg: "#FFFFFF",
+    cardBgActive: "#DCE9FF",
+    border: "#B9C8E8",
+    title: "#0F172A",
+    body: "#24324A",
+    caption: "#52617A",
+    iconButtonBg: "#FFFFFF",
+    chipWalkBg: "#EAF1FF",
+    chipBusBg: "#16A34A",
+  },
+  route: {
+    transit: "#7200f5",
+    walking: "#2563EB",
+    node: "#FFFFFF",
+    nodeBorder: "rgba(15, 23, 42, 0.72)",
   },
 };
 

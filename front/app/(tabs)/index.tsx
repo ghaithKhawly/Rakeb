@@ -1,298 +1,168 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { isAxiosError } from "axios";
 import {
+  Animated,
+  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   SafeAreaView,
+  Share,
   ScrollView,
   StyleSheet,
+  TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams } from "expo-router";
 import MapView, { Marker, Polyline } from "@/components/maps/MapViewCompat";
 import type { Region } from "@/components/maps/MapViewCompat";
 import * as Location from "expo-location";
+import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { LocationDTO } from "../../../types/location";
 import type {
   NavigationRouteRequestBody,
   NavigationRouteResult,
-  ParseNavigationTextResponse,
   RouteSegment,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
-import { Colors } from "@/constants/theme";
+import { Colors, Kinetic, TransitTheme } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { HintBanner } from "@/components/ui/HintBanner";
 import { MapSearchControl } from "@/components/MapSearchControl";
-import { RouteFeedbackPanel } from "@/components/home/RouteFeedbackPanel";
 import { RoutePlannerControls } from "@/components/home/RoutePlannerControls";
+import { RoutePreferencesModal } from "@/components/home/RoutePreferencesModal";
 import { RouteStepsList } from "@/components/home/RouteStepsList";
+import { getSegmentColor } from "@/utils/routeColors";
 import {
-  useParseNavigationTextMutation,
   useRoutingPreferences,
+  useSetRoutingPreferencesMutation,
 } from "@/hooks/useBusApi";
 import { useLanguage } from "@/hooks/LanguageContext";
+import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "@/utils/haptics";
+import {
+  extractApiErrorMessage,
+  getSelectedRoute,
+  INITIAL_REGION,
+  POINT_COLORS,
+  pointId,
+  pointName,
+  toMapCoordinates,
+} from "@/utils/homeScreenUtils";
 
-const INITIAL_REGION: Region = {
-  latitude: 33.5138,
-  longitude: 36.2765,
-  latitudeDelta: 0.06,
-  longitudeDelta: 0.06,
+type RouteFilterValue =
+  | "balanced"
+  | "fastest"
+  | "fewestTransfers"
+  | "lessWalking"
+  | "cheapest"
+  | "lessCrowded";
+
+const ROUTE_FILTER_WEIGHTS: Record<
+  RouteFilterValue,
+  { speed: number; crowding: number; price: number; transfer: number; walking: number }
+> = {
+  balanced: { speed: 1, crowding: 1, price: 1, transfer: 1, walking: 1 },
+  fastest: { speed: 2, crowding: 0.8, price: 0.8, transfer: 1.2, walking: 0.8 },
+  fewestTransfers: { speed: 1.1, crowding: 0.8, price: 0.8, transfer: 2, walking: 1.1 },
+  lessWalking: { speed: 1, crowding: 0.8, price: 0.8, transfer: 1.3, walking: 2 },
+  cheapest: { speed: 0.9, crowding: 0.8, price: 2, transfer: 1, walking: 1 },
+  lessCrowded: { speed: 1, crowding: 2, price: 0.8, transfer: 1, walking: 1 },
 };
 
-const POINT_COLORS = [
-  "#22C55E",
-  "#0EA5E9",
-  "#F97316",
-  "#A855F7",
-  "#EAB308",
-  "#EF4444",
-  "#14B8A6",
-];
+const UNIVERSAL_LINK_BASE = "https://jr-routing.app/route-share";
+const FAVORITE_ORIGINS_STORAGE_KEY = "favorite_origins";
 
-function pointName(index: number): string {
-  const base = "A".charCodeAt(0);
-  return `Point ${String.fromCharCode(base + (index % 26))}`;
-}
+type FavoriteOrigin = {
+  id: string;
+  label: string;
+  lat: number;
+  lng: number;
+  updatedAt: number;
+};
 
-function pointId(lat: number, lng: number): string {
-  return `${lat.toFixed(6)}:${lng.toFixed(6)}`;
-}
+function normalizePreferenceWeights(weights: {
+  speed: number;
+  crowding: number;
+  price: number;
+  transfer: number;
+  walking: number;
+}) {
+  const sum =
+    Math.max(0, weights.speed) +
+    Math.max(0, weights.crowding) +
+    Math.max(0, weights.price) +
+    Math.max(0, weights.transfer) +
+    Math.max(0, weights.walking);
 
-function approxDistanceM(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number },
-): number {
-  const latScaleM = 111_320;
-  const avgLatRad = ((a.latitude + b.latitude) / 2) * (Math.PI / 180);
-  const lngScaleM = 111_320 * Math.cos(avgLatRad);
-  const dLatM = (b.latitude - a.latitude) * latScaleM;
-  const dLngM = (b.longitude - a.longitude) * lngScaleM;
-  return Math.hypot(dLatM, dLngM);
-}
-
-function sanitizeMapCoordinates(
-  points: { latitude: number; longitude: number }[],
-): { latitude: number; longitude: number }[] {
-  if (points.length < 3) {
-    return points;
+  if (sum <= 0) {
+    return { speed: 0.2, crowding: 0.2, price: 0.2, transfer: 0.2, walking: 0.2 };
   }
 
-  // Pass 1: drop near-duplicate jitter points.
-  const deduped: { latitude: number; longitude: number }[] = [
-    points[0] as { latitude: number; longitude: number },
-  ];
-  for (let i = 1; i < points.length; i += 1) {
-    const candidate = points[i] as { latitude: number; longitude: number };
-    const prev = deduped[deduped.length - 1] as {
-      latitude: number;
-      longitude: number;
-    };
-    if (approxDistanceM(prev, candidate) >= 3) {
-      deduped.push(candidate);
+  return {
+    speed: Math.max(0, weights.speed) / sum,
+    crowding: Math.max(0, weights.crowding) / sum,
+    price: Math.max(0, weights.price) / sum,
+    transfer: Math.max(0, weights.transfer) / sum,
+    walking: Math.max(0, weights.walking) / sum,
+  };
+}
+
+function nearestRouteFilter(weights: {
+  speed: number;
+  crowding: number;
+  price: number;
+  transfer: number;
+  walking: number;
+}): RouteFilterValue {
+  const normalizedInput = normalizePreferenceWeights(weights);
+  const entries = Object.entries(ROUTE_FILTER_WEIGHTS) as Array<
+    [RouteFilterValue, (typeof ROUTE_FILTER_WEIGHTS)[RouteFilterValue]]
+  >;
+  let bestFilter: RouteFilterValue = "balanced";
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const [filterName, target] of entries) {
+    const normalizedTarget = normalizePreferenceWeights(target);
+    const score =
+      Math.abs(normalizedTarget.speed - normalizedInput.speed) +
+      Math.abs(normalizedTarget.crowding - normalizedInput.crowding) +
+      Math.abs(normalizedTarget.price - normalizedInput.price) +
+      Math.abs(normalizedTarget.transfer - normalizedInput.transfer) +
+      Math.abs(normalizedTarget.walking - normalizedInput.walking);
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestFilter = filterName;
     }
   }
 
-  if (deduped.length < 3) {
-    return deduped;
-  }
-
-  // Pass 2: remove tiny "out-and-back" spikes that look like branches.
-  const cleaned: { latitude: number; longitude: number }[] = [
-    deduped[0] as { latitude: number; longitude: number },
-  ];
-  for (let i = 1; i < deduped.length - 1; i += 1) {
-    const a = cleaned[cleaned.length - 1] as {
-      latitude: number;
-      longitude: number;
-    };
-    const b = deduped[i] as { latitude: number; longitude: number };
-    const c = deduped[i + 1] as { latitude: number; longitude: number };
-
-    const ab = approxDistanceM(a, b);
-    const bc = approxDistanceM(b, c);
-    const ac = approxDistanceM(a, c);
-
-    const v1x = b.longitude - a.longitude;
-    const v1y = b.latitude - a.latitude;
-    const v2x = c.longitude - b.longitude;
-    const v2y = c.latitude - b.latitude;
-    const v1Len = Math.hypot(v1x, v1y);
-    const v2Len = Math.hypot(v2x, v2y);
-
-    let cosine = 1;
-    if (v1Len > 0 && v2Len > 0) {
-      cosine = (v1x * v2x + v1y * v2y) / (v1Len * v2Len);
-    }
-
-    const isTinySpike = cosine < -0.7 && ab < 120 && bc < 120 && ac < 45;
-    if (!isTinySpike) {
-      cleaned.push(b);
-    }
-  }
-
-  cleaned.push(
-    deduped[deduped.length - 1] as { latitude: number; longitude: number },
-  );
-  return cleaned;
-}
-
-function toMapCoordinates(
-  segment: RouteSegment,
-): { latitude: number; longitude: number }[] {
-  const geometry = segment.coordinates
-    ?.filter(
-      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
-    )
-    .map((point) => ({ latitude: point.lat, longitude: point.lng }));
-
-  if (geometry && geometry.length >= 2) {
-    return sanitizeMapCoordinates(geometry);
-  }
-
-  // Fallback for older/cached payloads that may not include detailed geometry
-  return [
-    { latitude: segment.from.lat, longitude: segment.from.lng },
-    { latitude: segment.to.lat, longitude: segment.to.lng },
-  ];
-}
-
-function getSelectedRoute(
-  routeResult: NavigationRouteResult | null,
-  selectedRouteIndex: number,
-): NavigationRouteResult | null {
-  if (!routeResult) {
-    return null;
-  }
-
-  const routeChoices =
-    Array.isArray(routeResult.routes) && routeResult.routes.length > 0
-      ? routeResult.routes
-      : [routeResult, ...(routeResult.alternatives ?? [])];
-
-  if (selectedRouteIndex >= 0 && selectedRouteIndex < routeChoices.length) {
-    return routeChoices[selectedRouteIndex] as NavigationRouteResult;
-  }
-
-  return routeResult;
-}
-
-function extractApiErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const data = error.response?.data as
-      | {
-          error?: string;
-          message?: string;
-          details?:
-            | string
-            | { message?: string }
-            | { field?: string; message?: string }[];
-        }
-      | string
-      | undefined;
-
-    if (typeof data === "string" && data.trim().length > 0) {
-      return data;
-    }
-
-    if (data && typeof data === "object") {
-      if (typeof data.details === "string" && data.details.trim().length > 0) {
-        return data.details;
-      }
-
-      if (
-        data.details &&
-        typeof data.details === "object" &&
-        !Array.isArray(data.details) &&
-        typeof data.details.message === "string" &&
-        data.details.message.trim().length > 0
-      ) {
-        return data.details.message;
-      }
-
-      const details = Array.isArray(data.details)
-        ? data.details
-            .map((item) => {
-              if (!item) {
-                return "";
-              }
-              const field = item.field ? `${item.field}: ` : "";
-              return `${field}${item.message ?? "Invalid value"}`;
-            })
-            .filter(Boolean)
-        : [];
-
-      if (details.length > 0) {
-        return details.join("\n");
-      }
-
-      if (typeof data.error === "string" && data.error.trim().length > 0) {
-        return data.error;
-      }
-
-      if (typeof data.message === "string" && data.message.trim().length > 0) {
-        return data.message;
-      }
-    }
-
-    if (error.message) {
-      return error.message;
-    }
-  }
-
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return "Failed to compute route.";
-}
-
-function isNavigationRouteResult(
-  value: unknown,
-): value is NavigationRouteResult {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as { segments?: unknown; etaSeconds?: unknown };
-  return (
-    Array.isArray(candidate.segments) &&
-    typeof candidate.etaSeconds === "number"
-  );
-}
-
-function buildNaturalRouteFallbackMessage(
-  response: ParseNavigationTextResponse,
-): string {
-  if (response.message && response.message.trim().length > 0) {
-    return response.message;
-  }
-
-  switch (response.reason) {
-    case "feature_disabled":
-      return "Text route parsing is currently disabled on the server (NLP_ENABLED is off).";
-    case "parse_failed":
-      return "Could not parse that request. Try clearer start/destination names or choose points on the map.";
-    case "unknown_landmark":
-      return "Could not recognize one of the places. Try another wording or pick points on the map.";
-    case "empty_or_invalid_input":
-      return "Please enter a route request first.";
-    default:
-      return "Could not parse your text request. Please pick points on the map.";
-  }
+  return bestFilter;
 }
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { isRTL, t } = useLanguage();
+  const sharedParams = useLocalSearchParams<{
+    fromLat?: string;
+    fromLng?: string;
+    fromLabel?: string;
+    toLat?: string;
+    toLng?: string;
+    toLabel?: string;
+  }>();
   const topOverlayInset = Math.max(insets.top, 10) + 8;
   const topMapControlInset = Math.max(topOverlayInset - 2, 0);
+  const sheetBottomOffset = Math.max(insets.bottom + 6, 10);
   const mapRef = useRef<any>(null);
   const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
-  const parseNavigationTextMutation = useParseNavigationTextMutation();
+  const setRoutingPreferencesMutation = useSetRoutingPreferencesMutation();
+  const [mapType, setMapType] = useState<"standard" | "satellite">("standard");
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
     null,
@@ -302,19 +172,67 @@ export default function HomeScreen() {
     null,
   );
   const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
+  const [expandedRouteIndex, setExpandedRouteIndex] = useState<number | null>(null);
+  const [focusedStepIndex, setFocusedStepIndex] = useState<number | null>(null);
   const [mapSelectionMode, setMapSelectionMode] = useState<
     "start" | "destination"
   >("destination");
+  const [selectionPhase, setSelectionPhase] = useState<
+    "destination" | "origin_menu" | "origin_map" | "ready"
+  >("destination");
+  const [originMenuOpen, setOriginMenuOpen] = useState(false);
+  const [originPanelAnchor, setOriginPanelAnchor] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const originPanelAnim = useRef(new Animated.Value(0)).current;
+  const [originSearchText, setOriginSearchText] = useState(t("map.startFallback"));
+  const [mapCenterPoint, setMapCenterPoint] = useState<LocationDTO | null>(null);
+  const [favoriteOrigins, setFavoriteOrigins] = useState<FavoriteOrigin[]>([]);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
   const [isRouting, setIsRouting] = useState(false);
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
-  const [naturalRouteText, setNaturalRouteText] = useState("");
+  const [destinationSearchText, setDestinationSearchText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
+  const [isSheetCollapsed, setIsSheetCollapsed] = useState(true);
+  const [mapSegmentHint, setMapSegmentHint] = useState<{
+    label: string;
+    color: string;
+  } | null>(null);
+  const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<RouteFilterValue>("balanced");
+  const lastHandledSharedRouteRef = useRef<string | null>(null);
 
+  const formatTransferText = (count: number) => {
+    if (count === 1) {
+      return `1 ${t("route.transfer")}`;
+    }
+
+    return `${count} ${t("route.transfers")}`;
+  };
+
+  const isCrosshairMode = selectionPhase === "origin_map";
   const selectedRoute = useMemo(
     () => getSelectedRoute(routeResult, selectedAlternativeIndex),
     [routeResult, selectedAlternativeIndex],
   );
+
+  const routeChoices = useMemo(() => {
+    if (!routeResult) {
+      return [] as NavigationRouteResult[];
+    }
+
+    if (Array.isArray(routeResult.routes) && routeResult.routes.length > 0) {
+      return routeResult.routes;
+    }
+
+    return [routeResult, ...(routeResult.alternatives ?? [])];
+  }, [routeResult]);
+
+  const expandedRoute =
+    expandedRouteIndex !== null ? routeChoices[expandedRouteIndex] ?? null : null;
 
   useEffect(() => {
     const detect = async () => {
@@ -331,10 +249,12 @@ export default function HomeScreen() {
       const point: LocationDTO = {
         lat: found.coords.latitude,
         lng: found.coords.longitude,
-        label: "Current Location",
+        label: t("map.startFallback"),
       };
 
       setCurrentLocation(point);
+      setOriginSearchText(point.label ?? t("map.startFallback"));
+      setMapCenterPoint(point);
       mapRef.current?.animateToRegion(
         {
           latitude: point.lat,
@@ -349,6 +269,125 @@ export default function HomeScreen() {
     void detect();
   }, []);
 
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const stored = await SecureStore.getItemAsync(FAVORITE_ORIGINS_STORAGE_KEY);
+        if (!stored) {
+          setFavoritesLoaded(true);
+          return;
+        }
+
+        const parsed = JSON.parse(stored) as FavoriteOrigin[];
+        if (Array.isArray(parsed)) {
+          setFavoriteOrigins(
+            parsed.filter(
+              (item) =>
+                item &&
+                typeof item.id === "string" &&
+                typeof item.label === "string" &&
+                Number.isFinite(item.lat) &&
+                Number.isFinite(item.lng),
+            ),
+          );
+        }
+      } catch {
+        // Ignore invalid cache and continue with empty favorites.
+      } finally {
+        setFavoritesLoaded(true);
+      }
+    };
+
+    void loadFavorites();
+  }, []);
+
+  useEffect(() => {
+    if (!favoritesLoaded) {
+      return;
+    }
+
+    void SecureStore.setItemAsync(
+      FAVORITE_ORIGINS_STORAGE_KEY,
+      JSON.stringify(favoriteOrigins),
+    );
+  }, [favoriteOrigins, favoritesLoaded]);
+
+  useEffect(() => {
+    const fromLat = Number.parseFloat(sharedParams.fromLat ?? "");
+    const fromLng = Number.parseFloat(sharedParams.fromLng ?? "");
+    const toLat = Number.parseFloat(sharedParams.toLat ?? "");
+    const toLng = Number.parseFloat(sharedParams.toLng ?? "");
+
+    if (
+      !Number.isFinite(fromLat) ||
+      !Number.isFinite(fromLng) ||
+      !Number.isFinite(toLat) ||
+      !Number.isFinite(toLng)
+    ) {
+      return;
+    }
+
+    const key = `${fromLat}:${fromLng}:${toLat}:${toLng}`;
+    if (lastHandledSharedRouteRef.current === key) {
+      return;
+    }
+    lastHandledSharedRouteRef.current = key;
+
+    const fromPoint: LocationDTO = {
+      lat: fromLat,
+      lng: fromLng,
+      label:
+        typeof sharedParams.fromLabel === "string" && sharedParams.fromLabel.trim().length > 0
+          ? sharedParams.fromLabel
+          : t("route.share.start"),
+    };
+    const toPoint: LocationDTO = {
+      lat: toLat,
+      lng: toLng,
+      label:
+        typeof sharedParams.toLabel === "string" && sharedParams.toLabel.trim().length > 0
+          ? sharedParams.toLabel
+          : t("route.share.destination"),
+    };
+
+    setCurrentLocation(fromPoint);
+    setDestination(toPoint);
+    setOriginSearchText(fromPoint.label ?? t("map.startFallback"));
+    setDestinationSearchText(toPoint.label ?? t("map.destinationFallback"));
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+
+    mapRef.current?.fitToCoordinates(
+      [
+        { latitude: fromPoint.lat, longitude: fromPoint.lng },
+        { latitude: toPoint.lat, longitude: toPoint.lng },
+      ],
+      {
+        edgePadding: { top: 110, right: 40, bottom: 260, left: 40 },
+        animated: true,
+      },
+    );
+
+    void requestRoute(fromPoint, toPoint);
+  }, [
+    sharedParams.fromLat,
+    sharedParams.fromLng,
+    sharedParams.toLat,
+    sharedParams.toLng,
+    sharedParams.fromLabel,
+    sharedParams.toLabel,
+    t,
+  ]);
+
+  useEffect(() => {
+    const data = routingPreferencesQuery.data;
+    if (!data) {
+      return;
+    }
+
+    setActiveFilter(nearestRouteFilter(data.preferences));
+  }, [routingPreferencesQuery.data]);
+
   const polylines = useMemo(() => {
     if (!selectedRoute) {
       return [];
@@ -356,11 +395,208 @@ export default function HomeScreen() {
 
     return selectedRoute.segments.map((segment, idx) => ({
       id: `${segment.mode}-${segment.routeId ?? "walk"}-${idx}`,
-      color: segment.mode === "walk" ? "#F97316" : Colors.dark.primary,
-      width: segment.mode === "walk" ? 4 : 6,
+      mode: segment.mode,
+      label:
+        segment.mode === "bus"
+          ? segment.routeName ?? `${t("steps.routeFallback")} ${idx + 1}`
+          : t("steps.walk"),
+      color:
+        segment.mode === "walk"
+          ? TransitTheme.route.walking
+          : getSegmentColor(segment.routeName ?? t("steps.routeFallback"), idx),
+      width: segment.mode === "walk" ? 3 : 6,
+      casingColor: segment.mode === "walk" ? "rgba(15, 23, 42, 0.6)" : "#FFFFFF",
+      casingWidth: segment.mode === "walk" ? 5 : 10,
       coordinates: toMapCoordinates(segment),
     }));
   }, [selectedRoute]);
+
+  const segmentModeBadges = useMemo(() => {
+    if (!selectedRoute) {
+      return [] as {
+        id: string;
+        latitude: number;
+        longitude: number;
+        iconName: React.ComponentProps<typeof Ionicons>["name"];
+        backgroundColor: string;
+        label?: string;
+      }[];
+    }
+
+    return selectedRoute.segments.map((segment, index) => {
+      const coordinates = toMapCoordinates(segment);
+      const midpoint =
+        coordinates[Math.floor(coordinates.length / 2)] ?? {
+          latitude: segment.from.lat,
+          longitude: segment.from.lng,
+        };
+
+      const iconName: React.ComponentProps<typeof Ionicons>["name"] =
+        segment.mode === "walk"
+          ? "walk-outline"
+          : segment.mode === "bus"
+            ? "bus-outline"
+            : segment.mode === "rail"
+              ? "train-outline"
+              : segment.mode === "car"
+                ? "car-outline"
+                : "navigate-outline";
+
+      const backgroundColor =
+        segment.mode === "walk"
+          ? TransitTheme.panel.chipWalkBg
+          : segment.mode === "bus"
+            ? getSegmentColor(segment.routeName ?? t("steps.routeFallback"), index)
+            : "#475569";
+
+      return {
+        id: `segment-badge-${segment.mode}-${segment.routeId ?? "step"}-${index}`,
+        latitude: midpoint.latitude,
+        longitude: midpoint.longitude,
+        iconName,
+        backgroundColor,
+        label: segment.mode === "bus" ? (segment.routeName ?? `${t("steps.routeFallback")} ${index + 1}`) : undefined,
+      };
+    });
+  }, [selectedRoute, t]);
+
+  const segmentNodes = useMemo(() => {
+    if (!selectedRoute) {
+      return [] as {
+        id: string;
+        latitude: number;
+        longitude: number;
+        variant: "walk" | "segment";
+        color: string;
+        borderColor: string;
+      }[];
+    }
+
+    const nodes: {
+      id: string;
+      latitude: number;
+      longitude: number;
+      variant: "walk" | "segment";
+      color: string;
+      borderColor: string;
+    }[] = [];
+    const seen = new Set<string>();
+
+    const pushNode = (
+      latitude: number,
+      longitude: number,
+      variant: "walk" | "segment",
+      color: string,
+      borderColor: string,
+    ) => {
+      const id = `${pointId(latitude, longitude)}-${variant}`;
+      if (seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      nodes.push({ id, latitude, longitude, variant, color, borderColor });
+    };
+
+    selectedRoute.segments.forEach((segment, index) => {
+      const coordinates = toMapCoordinates(segment);
+      if (coordinates.length === 0) {
+        return;
+      }
+
+      const segmentColor =
+        segment.mode === "walk"
+          ? TransitTheme.route.walking
+          : getSegmentColor(segment.routeName ?? t("steps.routeFallback"), index);
+
+      if (segment.mode === "walk") {
+        const step = Math.max(1, Math.floor(coordinates.length / 7));
+        coordinates.forEach((coord, coordIndex) => {
+          if (coordIndex % step === 0 || coordIndex === coordinates.length - 1) {
+            pushNode(
+              coord.latitude,
+              coord.longitude,
+              "walk",
+              segmentColor,
+              "rgba(15, 23, 42, 0.35)",
+            );
+          }
+        });
+        return;
+      }
+
+      const first = coordinates[0];
+      const last = coordinates[coordinates.length - 1];
+      if (first) {
+        pushNode(
+          first.latitude,
+          first.longitude,
+          "segment",
+          segmentColor,
+          TransitTheme.route.nodeBorder,
+        );
+      }
+      if (last) {
+        pushNode(
+          last.latitude,
+          last.longitude,
+          "segment",
+          segmentColor,
+          TransitTheme.route.nodeBorder,
+        );
+      }
+    });
+
+    return nodes;
+  }, [selectedRoute, t]);
+
+  const shareRoute = async () => {
+    if (!selectedRoute) {
+      return;
+    }
+
+    const originLabel = selectedRoute.from.label ?? t("route.share.start");
+    const destinationLabel = selectedRoute.to.label ?? t("route.share.destination");
+    const googleMapsLink = `https://www.google.com/maps/dir/?api=1&origin=${selectedRoute.from.lat},${selectedRoute.from.lng}&destination=${selectedRoute.to.lat},${selectedRoute.to.lng}&travelmode=transit`;
+    const universalLink = `${UNIVERSAL_LINK_BASE}?fromLat=${selectedRoute.from.lat}&fromLng=${selectedRoute.from.lng}&fromLabel=${encodeURIComponent(originLabel)}&toLat=${selectedRoute.to.lat}&toLng=${selectedRoute.to.lng}&toLabel=${encodeURIComponent(destinationLabel)}&googleMaps=${encodeURIComponent(googleMapsLink)}`;
+
+    const lines = selectedRoute.segments.map((segment, index) => {
+      const modeLabel = segment.mode === "walk" ? t("steps.walk") : `${t("steps.takeBus")} ${segment.routeName ?? `${t("steps.routeFallback")} ${index + 1}`}`;
+      const minutes = Math.max(1, Math.round(segment.timeSeconds / 60));
+      return `${index + 1}. ${modeLabel} - ${minutes} ${t("route.min")}`;
+    });
+
+    const summary = [
+      `${t("route.share.title")}`,
+      `${originLabel} -> ${destinationLabel}`,
+      `${Math.max(1, Math.round(selectedRoute.etaSeconds / 60))} ${t("route.min")} - ${formatTransferText(selectedRoute.transferCount)} - ${Math.round(selectedRoute.walkingDistanceM)}m ${t("route.walk")}`,
+      "",
+      `${t("route.share.universalLinkLabel")}: ${universalLink}`,
+      "",
+      ...lines,
+    ].join("\n");
+
+    try {
+      await Share.share({
+        title: t("route.share.title"),
+        message: summary,
+        url: universalLink,
+      });
+    } catch {
+      Alert.alert(t("route.share.failedTitle"), t("route.share.failedBody"));
+    }
+  };
+
+  useEffect(() => {
+    if (!mapSegmentHint) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setMapSegmentHint(null);
+    }, 2200);
+
+    return () => clearTimeout(timeoutId);
+  }, [mapSegmentHint]);
 
   const routePoints = useMemo(() => {
     if (!selectedRoute) {
@@ -407,18 +643,140 @@ export default function HomeScreen() {
     return points;
   }, [selectedRoute]);
 
-  const pointColorByLabel = useMemo(() => {
-    return routePoints.reduce<Record<string, string>>((acc, point) => {
-      acc[point.label] = point.color;
-      return acc;
-    }, {});
-  }, [routePoints]);
+  const focusRouteSegment = (segment: RouteSegment, segmentIndex: number) => {
+    hapticLight();
+    const coordinates = toMapCoordinates(segment);
+    if (coordinates.length > 0) {
+      mapRef.current?.fitToCoordinates(coordinates, {
+        edgePadding: { top: 110, right: 40, bottom: 260, left: 40 },
+        animated: true,
+      });
+    }
+
+    setIsSheetCollapsed(true);
+    setFocusedStepIndex(segmentIndex);
+  };
+
+  const toggleMapType = () => {
+    hapticSelection();
+    setMapType((currentType) =>
+      currentType === "standard" ? "satellite" : "standard",
+    );
+  };
+
+  const recenterToCurrentLocation = async () => {
+    hapticSelection();
+
+    if (!currentLocation) {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status !== "granted") {
+          Alert.alert(
+            t("home.error.locationPermission"),
+            t("home.error.locationPermission"),
+          );
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        const point: LocationDTO = {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          label: t("map.startFallback"),
+        };
+
+        setCurrentLocation(point);
+        mapRef.current?.animateToRegion(
+          {
+            latitude: point.lat,
+            longitude: point.lng,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          },
+          350,
+        );
+        return;
+      } catch {
+        Alert.alert(
+          t("home.error.locationPermission"),
+          t("home.error.locationPermission"),
+        );
+        return;
+      }
+    }
+
+    mapRef.current?.animateToRegion(
+      {
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      350,
+    );
+  };
+
+  const fitSelectedRouteToMap = () => {
+    hapticLight();
+
+    if (selectedRoute) {
+      applyRouteToMap(selectedRoute);
+      return;
+    }
+
+    if (currentLocation && destination) {
+      mapRef.current?.fitToCoordinates(
+        [
+          { latitude: currentLocation.lat, longitude: currentLocation.lng },
+          { latitude: destination.lat, longitude: destination.lng },
+        ],
+        {
+          edgePadding: { top: 80, right: 40, bottom: 180, left: 40 },
+          animated: true,
+        },
+      );
+    }
+  };
+
+  const sheetSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dy) > 8 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy > 22 && !isSheetCollapsed) {
+            hapticMedium();
+            setIsSheetCollapsed(true);
+            Keyboard.dismiss();
+            return;
+          }
+
+          if (gestureState.dy < -22 && isSheetCollapsed) {
+            hapticMedium();
+            setIsSheetCollapsed(false);
+          }
+        },
+      }),
+    [isSheetCollapsed],
+  );
 
   const requestRouteForPoints = async (
     from: LocationDTO,
     to: LocationDTO,
   ): Promise<NavigationRouteResult> => {
-    const savedPrefs = routingPreferencesQuery.data;
+    let savedPrefs = routingPreferencesQuery.data;
+
+    try {
+      const latestPreferenceSnapshot = await routingPreferencesQuery.refetch();
+      savedPrefs = latestPreferenceSnapshot.data ?? savedPrefs;
+    } catch {
+      // Keep routing available even if preferences refresh fails.
+    }
 
     const payload: NavigationRouteRequestBody = {
       from,
@@ -465,8 +823,11 @@ export default function HomeScreen() {
     }
   };
 
-  const requestRoute = async () => {
-    if (!currentLocation || !destination) {
+  const requestRoute = async (
+    from = currentLocation,
+    to = destination,
+  ) => {
+    if (!from || !to) {
       Alert.alert(
         t("home.error.missingPointsTitle"),
         t("home.error.missingPointsBody"),
@@ -475,13 +836,20 @@ export default function HomeScreen() {
     }
 
     setIsRouting(true);
+    hapticMedium();
     setError(null);
     setSelectedAlternativeIndex(0);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
 
     try {
-      const result = await requestRouteForPoints(currentLocation, destination);
+      const result = await requestRouteForPoints(from, to);
       setRouteResult(result);
+      setExpandedRouteIndex(null);
+      setFocusedStepIndex(null);
       applyRouteToMap(result);
+      setIsSheetCollapsed(false);
+      hapticSuccess();
     } catch (err) {
       const message = extractApiErrorMessage(err);
       setError(message);
@@ -492,95 +860,158 @@ export default function HomeScreen() {
     }
   };
 
-  const handleNaturalAction = async (response: ParseNavigationTextResponse) => {
-    switch (response.action) {
-      case "preview_points": {
-        if (!response.from || !response.to) {
-          setError("NLP response did not include valid route points.");
-          return;
-        }
-
-        setCurrentLocation(response.from);
-        setDestination(response.to);
-        setMapSelectionMode("destination");
-        setError(null);
-
-        const result = await requestRouteForPoints(response.from, response.to);
-        setRouteResult(result);
-        applyRouteToMap(result);
-        setNaturalRouteText("");
-        return;
-      }
-      case "route_result": {
-        if (!isNavigationRouteResult(response.route)) {
-          setError("NLP route result was returned in an unsupported format.");
-          return;
-        }
-
-        setCurrentLocation(response.route.from);
-        setDestination(response.route.to);
-        setRouteResult(response.route);
-        setError(null);
-        applyRouteToMap(response.route);
-        setNaturalRouteText("");
-        return;
-      }
-      case "ask_clarification": {
-        const message =
-          response.question ?? "Please clarify your route request.";
-        setError(message);
-        Alert.alert("Clarification needed", message);
-        return;
-      }
-      case "not_a_trip_request":
-      case "show_map_picker": {
-        const message = buildNaturalRouteFallbackMessage(response);
-        setError(message);
-        Alert.alert("Text route", message);
-        return;
-      }
-      case "show_route_info": {
-        Alert.alert(
-          "Route info",
-          "This request returned route information only. Use map points to compute a trip.",
-        );
-        return;
-      }
-      default: {
-        setError("Unexpected NLP response action.");
-      }
-    }
-  };
-
-  const submitNaturalRouteText = async () => {
-    const text = naturalRouteText.trim();
-    if (!text) {
-      Alert.alert("Missing text", "Type a route request first.");
-      return;
-    }
-
-    setError(null);
+  const applyRouteFilter = async (value: RouteFilterValue) => {
+    const previousFilter = activeFilter;
+    setActiveFilter(value);
 
     try {
-      const response = await parseNavigationTextMutation.mutateAsync({
-        text,
+      await setRoutingPreferencesMutation.mutateAsync({
+        preferences: ROUTE_FILTER_WEIGHTS[value],
       });
-      await handleNaturalAction(response);
+
+      await routingPreferencesQuery.refetch();
+
+      // Recompute immediately so selected filter changes route results without extra taps.
+      if (currentLocation && destination) {
+        await requestRoute(currentLocation, destination);
+      }
     } catch (err) {
+      setActiveFilter(previousFilter);
       const message = extractApiErrorMessage(err);
       setError(message);
-      Alert.alert("Text route failed", message);
+      Alert.alert(t("home.filterUpdateFailedTitle"), message);
     }
   };
 
   const clearRoute = () => {
+    hapticSelection();
     setRouteResult(null);
     setCurrentLocation(null);
     setDestination(null);
-    setNaturalRouteText("");
+    setSelectionPhase("destination");
+    setIsSheetCollapsed(true);
+    setOriginMenuOpen(false);
     setMapSelectionMode("destination");
+    setDestinationSearchText("");
     setError(null);
     setSelectedAlternativeIndex(0);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+  };
+
+  const openOriginSelectionPanel = () => {
+    setOriginSearchText(currentLocation?.label ?? t("map.startFallback"));
+    setOriginMenuOpen(true);
+    originPanelAnim.setValue(0);
+    Animated.spring(originPanelAnim, {
+      toValue: 1,
+      damping: 18,
+      stiffness: 180,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const promptOriginSelectionAfterDestination = () => {
+    setSelectionPhase("origin_menu");
+    openOriginSelectionPanel();
+  };
+
+  const closeOriginSelectionPanel = () => {
+    Animated.timing(originPanelAnim, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setOriginMenuOpen(false);
+      }
+    });
+  };
+
+  const openOriginSelectionMenu = () => {
+    hapticSelection();
+    promptOriginSelectionAfterDestination();
+  };
+
+  const beginOriginMapSelection = () => {
+    hapticLight();
+    closeOriginSelectionPanel();
+    setSelectionPhase("origin_map");
+    setMapSelectionMode("start");
+    setIsSheetCollapsed(true);
+    setOriginMenuOpen(false);
+  };
+
+  const confirmOriginFromMapCenter = () => {
+    if (!mapCenterPoint) {
+      return;
+    }
+    const point: LocationDTO = {
+      lat: mapCenterPoint.lat,
+      lng: mapCenterPoint.lng,
+      label: `Start (${mapCenterPoint.lat.toFixed(4)}, ${mapCenterPoint.lng.toFixed(4)})`,
+    };
+    setCurrentLocation(point);
+    hapticSelection();
+    setOriginSearchText(point.label ?? t("map.startFallback"));
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+    setIsSheetCollapsed(false);
+    setRouteResult(null);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+  };
+
+  const useCurrentLocationAsOrigin = () => {
+    if (!currentLocation) {
+      return;
+    }
+
+    closeOriginSelectionPanel();
+    hapticSelection();
+    setSelectionPhase("ready");
+    setIsSheetCollapsed(false);
+    setRouteResult(null);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+  };
+
+  const saveCurrentLocationToFavorites = () => {
+    if (!currentLocation) {
+      return;
+    }
+
+    const favorite: FavoriteOrigin = {
+      id: pointId(currentLocation.lat, currentLocation.lng),
+      label: currentLocation.label ?? `${t("planner.start")} ${favoriteOrigins.length + 1}`,
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+      updatedAt: Date.now(),
+    };
+
+    setFavoriteOrigins((prev) => [
+      favorite,
+      ...prev.filter((item) => item.id !== favorite.id),
+    ].slice(0, 8));
+    hapticSuccess();
+  };
+
+  const useFavoriteAsOrigin = (favorite: FavoriteOrigin) => {
+    const point: LocationDTO = {
+      lat: favorite.lat,
+      lng: favorite.lng,
+      label: favorite.label,
+    };
+    setCurrentLocation(point);
+    setOriginSearchText(point.label ?? t("map.startFallback"));
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+    setRouteResult(null);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+    closeOriginSelectionPanel();
+    hapticSelection();
   };
 
   const searchPlace = async (query: string) => {
@@ -608,8 +1039,11 @@ export default function HomeScreen() {
       };
 
       setDestination(point);
+      setDestinationSearchText(searchText);
       setRouteResult(null);
       setMapSelectionMode("destination");
+      hapticMedium();
+      promptOriginSelectionAfterDestination();
 
       mapRef.current?.animateToRegion(
         {
@@ -637,11 +1071,19 @@ export default function HomeScreen() {
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           initialRegion={INITIAL_REGION}
+          mapType={mapType}
           showsUserLocation
           mapPadding={{ top: topMapControlInset, right: 0, bottom: 0, left: 0 }}
+          onRegionChangeComplete={(region) => {
+            setMapCenterPoint({
+              lat: region.latitude,
+              lng: region.longitude,
+              label: `Pinned (${region.latitude.toFixed(4)}, ${region.longitude.toFixed(4)})`,
+            });
+          }}
           onPress={(event) => {
             Keyboard.dismiss();
-            if (routeResult) {
+            if (isCrosshairMode) {
               return;
             }
             const { latitude, longitude } = event.nativeEvent.coordinate;
@@ -655,8 +1097,13 @@ export default function HomeScreen() {
               setDestination({
                 lat: latitude,
                 lng: longitude,
-                label: `Destination (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+                label: `${t("map.destinationPin")} (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
               });
+              setDestinationSearchText(
+                `${t("map.destinationPin")} (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+              );
+              hapticMedium();
+              promptOriginSelectionAfterDestination();
             }
             setRouteResult(null);
           }}
@@ -667,7 +1114,7 @@ export default function HomeScreen() {
                 latitude: currentLocation.lat,
                 longitude: currentLocation.lng,
               }}
-              title="Start"
+              title={t("planner.start")}
               description={currentLocation.label}
               pinColor="#22C55E"
             />
@@ -679,7 +1126,7 @@ export default function HomeScreen() {
                 latitude: destination.lat,
                 longitude: destination.lng,
               }}
-              title="Destination"
+              title={t("planner.destination")}
               description={destination.label}
             />
           ) : null}
@@ -692,8 +1139,37 @@ export default function HomeScreen() {
                 longitude: point.longitude,
               }}
               title={point.label}
-              description={index === 0 ? "Journey start" : "Route point"}
+              description={index === 0 ? t("route.share.start") : t("routePoint")}
               pinColor={point.color}
+            />
+          ))}
+
+          {polylines.map((line) => (
+            <Polyline
+              key={`${line.id}-casing`}
+              coordinates={line.coordinates}
+              strokeColor={line.casingColor}
+              strokeWidth={line.casingWidth}
+              lineDashPattern={line.mode === "walk" ? [1, 9] : undefined}
+            />
+          ))}
+
+          {polylines.map((line) => (
+            <Polyline
+              key={`${line.id}-hit`}
+              coordinates={line.coordinates}
+              strokeColor="rgba(0, 0, 0, 0)"
+              strokeWidth={line.mode === "walk" ? 42 : 58}
+              lineDashPattern={line.mode === "walk" ? [1, 9] : undefined}
+              onPress={() => {
+                if (line.mode === "bus") {
+                  hapticSelection();
+                }
+                setMapSegmentHint({
+                  label: line.label,
+                  color: line.color,
+                });
+              }}
             />
           ))}
 
@@ -703,15 +1179,306 @@ export default function HomeScreen() {
               coordinates={line.coordinates}
               strokeColor={line.color}
               strokeWidth={line.width}
+              lineDashPattern={line.mode === "walk" ? [1, 9] : undefined}
+              onPress={() => {
+                if (line.mode === "bus") {
+                  hapticSelection();
+                }
+                setMapSegmentHint({
+                  label: line.label,
+                  color: line.color,
+                });
+              }}
             />
+          ))}
+
+          {segmentNodes.map((node) => (
+            <Marker
+              key={node.id}
+              coordinate={{
+                latitude: node.latitude,
+                longitude: node.longitude,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View
+                style={[
+                  styles.segmentNodeDot,
+                  node.variant === "walk" && styles.segmentNodeDotWalk,
+                  {
+                    backgroundColor: node.color,
+                    borderColor: node.borderColor,
+                  },
+                ]}
+              />
+            </Marker>
+          ))}
+
+          {segmentModeBadges.map((badge) => (
+            <Marker
+              key={badge.id}
+              coordinate={{
+                latitude: badge.latitude,
+                longitude: badge.longitude,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+              onPress={() => {
+                if (badge.label) {
+                  hapticSelection();
+                  setMapSegmentHint({
+                    label: badge.label,
+                    color: badge.backgroundColor,
+                  });
+                }
+              }}
+            >
+              <View
+                style={[
+                  styles.mapSegmentModeBadge,
+                  { backgroundColor: badge.backgroundColor },
+                ]}
+              >
+                <Ionicons name={badge.iconName} size={12} color="#FFFFFF" />
+              </View>
+            </Marker>
           ))}
         </MapView>
 
+        {mapSegmentHint ? (
+          <View style={[styles.mapSegmentHintBanner, { backgroundColor: mapSegmentHint.color }]} pointerEvents="none">
+            <ThemedText style={styles.mapSegmentHintText} numberOfLines={1}>
+              {mapSegmentHint.label}
+            </ThemedText>
+          </View>
+        ) : null}
+
+      
+
         <MapSearchControl
           topInset={topOverlayInset}
-          isSearching={isSearchingPlace}
-          onSearch={searchPlace}
+          searchQuery={destinationSearchText}
+          onSearchQueryChange={setDestinationSearchText}
+          onSearchSubmit={() => searchPlace(destinationSearchText)}
+          onOpenOriginMenu={openOriginSelectionMenu}
+          onPanelAnchorLayout={setOriginPanelAnchor}
+          onFocusDestinationOnMap={() => {
+            setMapSelectionMode("destination");
+          }}
+          onUseMapPin={() => {
+            Keyboard.dismiss();
+            setMapSelectionMode("destination");
+            setRouteResult(null);
+            setExpandedRouteIndex(null);
+            setFocusedStepIndex(null);
+          }}
+          onSwapLocations={() => {
+            if (!currentLocation || !destination) {
+              return;
+            }
+
+            hapticSelection();
+            const previousCurrent = currentLocation;
+            const previousDestination = destination;
+            setCurrentLocation(previousDestination);
+            setDestination(previousCurrent);
+            setDestinationSearchText(previousCurrent.label ?? "");
+            setRouteResult(null);
+            setExpandedRouteIndex(null);
+            setFocusedStepIndex(null);
+            setSelectionPhase("ready");
+            setMapSelectionMode("destination");
+          }}
+          startLabel={currentLocation?.label}
+          destinationLabel={destination?.label}
         />
+        {isRouting ? (
+          <View style={styles.mapLoadingOverlay} pointerEvents="none">
+            <ActivityIndicator size="large" color={Kinetic.primary} />
+          </View>
+        ) : null}
+        <View style={styles.mapFabStack}>
+          <TouchableOpacity
+            style={styles.mapFabButton}
+            activeOpacity={0.85}
+            onPress={toggleMapType}
+          >
+            <Ionicons name="layers-outline" size={18} color={Colors.dark.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mapFabButton, styles.mapFabButtonActive]}
+            activeOpacity={0.85}
+            onPress={recenterToCurrentLocation}
+          >
+            <Ionicons name="locate" size={18} color={Colors.dark.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.mapFabButtonAccent}
+            activeOpacity={0.85}
+            onPress={fitSelectedRouteToMap}
+          >
+            <Ionicons name="navigate" size={17} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
+        {isCrosshairMode ? (
+          <>
+            <View style={styles.crosshairHeaderCard}>
+              <View style={styles.crosshairHeaderTextWrap}>
+                <ThemedText style={styles.crosshairHeaderTitle}>Choose start location</ThemedText>
+                <ThemedText style={styles.crosshairHeaderTitle}>{t("home.crosshair.title")}</ThemedText>
+                <ThemedText style={styles.crosshairHeaderSubtitle}>{t("home.crosshair.subtitle")}</ThemedText>
+              </View>
+              <TouchableOpacity
+                style={styles.crosshairCloseButton}
+                onPress={() => {
+                  hapticSelection();
+                  promptOriginSelectionAfterDestination();
+                }}
+              >
+                <Ionicons name="close" size={16} color={Colors.dark.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View pointerEvents="none" style={styles.fixedCrosshairWrap}>
+              <Ionicons name="location" size={42} color="#EF4444" style={styles.fixedPinIcon} />
+              <Ionicons name="close" size={14} color={Colors.dark.text} />
+            </View>
+
+            <View style={styles.crosshairFooter}>
+              <TouchableOpacity style={styles.crosshairSetButton} onPress={confirmOriginFromMapCenter}>
+                <ThemedText style={styles.crosshairSetButtonText}>{t("home.crosshair.set")}</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : null}
+
+        {originMenuOpen ? (
+          <Animated.View
+            style={[
+              styles.originPanelBackdrop,
+              {
+                opacity: originPanelAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 1],
+                }),
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={closeOriginSelectionPanel}
+            />
+
+            <Animated.View
+              style={[
+                styles.originPanel,
+                originPanelAnchor
+                  ? {
+                      top: originPanelAnchor.y + originPanelAnchor.height + 8,
+                      left: 12,
+                      right: 12,
+                    }
+                  : { top: topOverlayInset + 96, left: 12, right: 12 },
+                {
+                  opacity: originPanelAnim,
+                  transform: [
+                    {
+                      translateY: originPanelAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-18, 0],
+                      }),
+                    },
+                    {
+                      scale: originPanelAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.92, 1],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <View style={styles.originPanelBridge} />
+
+              <View style={styles.originPanelSearchStack}>
+                <View style={styles.originPanelSearchRow}>
+                  <Ionicons name="ellipse-outline" size={14} color="#60A5FA" />
+                  <ThemedText numberOfLines={1} style={styles.originPanelSearchText}>
+                    {currentLocation?.label ?? t("map.startFallback")}
+                  </ThemedText>
+                </View>
+                <View style={styles.originPanelSearchDivider} />
+                <View style={styles.originPanelSearchRow}>
+                  <Ionicons name="location-outline" size={15} color="#EF4444" />
+                  <ThemedText numberOfLines={1} style={styles.originPanelSearchText}>
+                    {destination?.label ?? (destinationSearchText || t("map.destinationFallback"))}
+                  </ThemedText>
+                </View>
+              </View>
+
+              <View style={styles.originPanelHeader}>
+                <View style={styles.originPanelTitleWrap}>
+                  <ThemedText style={styles.originPanelTitle}>{t("home.origin.header")}</ThemedText>
+                  <ThemedText style={styles.originPanelSubtitle}>{originSearchText}</ThemedText>
+                </View>
+                <TouchableOpacity style={styles.originPanelClose} onPress={closeOriginSelectionPanel}>
+                  <Ionicons name="close" size={18} color={Kinetic.onSurface} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.originActionsRow}>
+                <TouchableOpacity style={styles.originActionButton} onPress={beginOriginMapSelection}>
+                  <Ionicons name="map-outline" size={14} color="#60A5FA" />
+                  <ThemedText style={styles.originActionText}>{t("home.origin.chooseFromMap")}</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.originActionButton, !currentLocation && styles.originActionButtonDisabled]}
+                  onPress={useCurrentLocationAsOrigin}
+                  disabled={!currentLocation}
+                >
+                  <Ionicons name="locate-outline" size={14} color="#60A5FA" />
+                  <ThemedText style={styles.originActionText}>{t("home.origin.useCurrent")}</ThemedText>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.originFavoritesSection}>
+                <ThemedText style={styles.originFavoritesTitle}>{t("home.origin.favorites")}</ThemedText>
+                {favoriteOrigins.length === 0 ? (
+                  <TouchableOpacity
+                    style={styles.originFavoriteEmpty}
+                    onPress={saveCurrentLocationToFavorites}
+                    disabled={!currentLocation}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="heart-outline" size={14} color={TransitTheme.panel.caption} />
+                    <ThemedText style={styles.originFavoriteEmptyText}>
+                      {t("home.origin.saveCurrentFavorite")}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ) : (
+                  favoriteOrigins.map((favorite) => (
+                    <TouchableOpacity
+                      key={favorite.id}
+                      style={styles.originFavoriteRow}
+                      onPress={() => useFavoriteAsOrigin(favorite)}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="heart" size={14} color={Colors.dark.primary} />
+                      <View style={styles.originFavoriteCopy}>
+                        <ThemedText style={styles.originFavoriteLabel}>{favorite.label}</ThemedText>
+                        <ThemedText style={styles.originFavoriteMeta}>{favorite.lat.toFixed(4)}, {favorite.lng.toFixed(4)}</ThemedText>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            </Animated.View>
+          </Animated.View>
+        ) : null}
 
         <KeyboardAvoidingView
           style={styles.keyboardAvoiding}
@@ -721,13 +1488,24 @@ export default function HomeScreen() {
           }
           pointerEvents="box-none"
         >
+          {!isCrosshairMode ? (
           <View
-            style={[styles.sheet, isSheetCollapsed && styles.sheetCollapsed]}
+            style={[
+              styles.sheet,
+              { bottom: sheetBottomOffset },
+              isSheetCollapsed && styles.sheetCollapsed,
+            ]}
           >
+            <View style={styles.sheetDragHandleWrap} {...sheetSwipeResponder.panHandlers}>
+              <View style={styles.sheetDragHandle} />
+            </View>
             <ScrollView
               ref={sheetScrollRef}
               style={styles.sheetScroll}
-              contentContainerStyle={styles.sheetContent}
+              contentContainerStyle={[
+                styles.sheetContent,
+                { paddingBottom: Math.max(insets.bottom, 14) + 20 },
+              ]}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
@@ -736,60 +1514,173 @@ export default function HomeScreen() {
               <RoutePlannerControls
                 isCollapsed={isSheetCollapsed}
                 onToggleCollapsed={() => setIsSheetCollapsed((prev) => !prev)}
-                isPreferencesLoading={routingPreferencesQuery.isLoading}
-                hasSavedPreferences={Boolean(routingPreferencesQuery.data)}
-                startLabel={
-                  currentLocation?.label ?? "Detecting current location..."
-                }
-                destinationLabel={
-                  destination?.label ?? "Tap map to select destination"
-                }
-                mapSelectionMode={mapSelectionMode}
-                onChangeMapSelectionMode={setMapSelectionMode}
-                routeLocked={Boolean(routeResult)}
+                onOpenPreferences={() => setIsPreferencesModalOpen(true)}
+                activeFilter={activeFilter}
+                onChangeFilter={(value) => {
+                  void applyRouteFilter(value);
+                }}
+                isUpdatingFilter={setRoutingPreferencesMutation.isPending}
                 onRequestRoute={() => void requestRoute()}
                 isRouting={isRouting}
-                naturalRouteText={naturalRouteText}
-                onChangeNaturalRouteText={setNaturalRouteText}
-                onSubmitNaturalRouteText={() => void submitNaturalRouteText()}
-                isParsingNaturalRoute={parseNavigationTextMutation.isPending}
                 onClearRoute={clearRoute}
                 errorMessage={error}
-              />
+                showActionButtons={!routeResult}
+              >
+                {!routeResult ? (
+                  <HintBanner
+                    title={t("home.startHereTitle")}
+                    message={t("home.startHereBody")}
+                    compact
+                  />
+                ) : (
+                  <View style={styles.resultsPanel}>
+                    <View style={styles.resultsTopRow}>
+                      <View>
+                        <ThemedText style={styles.resultsPanelTitle}>{t("home.results.publicTransport")}</ThemedText>
+                        <ThemedText style={styles.resultsPanelSubtitle}>
+                          {t("home.results.tapToExpand")}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.resultsActionsCompactRow}>
+                        <TouchableOpacity
+                          style={styles.resultsClearCompactButton}
+                          onPress={() => {
+                            hapticSelection();
+                            void shareRoute();
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="share-social-outline" size={15} color={TransitTheme.panel.title} />
+                          <ThemedText style={styles.resultsClearCompactText}>{t("route.share.action")}</ThemedText>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.resultsClearCompactButton}
+                          onPress={() => {
+                            hapticSelection();
+                            clearRoute();
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="close-outline" size={15} color={TransitTheme.panel.title} />
+                          <ThemedText style={styles.resultsClearCompactText}>{t("planner.clear")}</ThemedText>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
 
-              {routeResult && !isSheetCollapsed ? (
-                <>
-                  <View style={styles.summaryRow}>
-                    <ThemedText style={styles.summaryText}>
-                      {t("route.eta")}:{" "}
-                      {Math.max(1, Math.round(routeResult.etaSeconds / 60))}{" "}
-                      {t("route.min")}
-                    </ThemedText>
-                    <ThemedText style={styles.summaryText}>
-                      {t("route.transfers")}: {routeResult.transferCount}
-                    </ThemedText>
-                    <ThemedText style={styles.summaryText}>
-                      {t("route.walk")}:{" "}
-                      {Math.round(routeResult.walkingDistanceM)}m
-                    </ThemedText>
+                    {expandedRoute ? (
+                      <View style={styles.expandedRoutePanel}>
+                        <TouchableOpacity
+                          style={styles.expandedRouteHeader}
+                          onPress={() => {
+                            hapticMedium();
+                            setExpandedRouteIndex(null);
+                            setFocusedStepIndex(null);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <View>
+                            <ThemedText style={styles.resultsPanelTitle}>{t("home.results.routeDetails")}</ThemedText>
+                            <ThemedText style={styles.resultsPanelSubtitle}>
+                              {Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} {t("route.min")} • {formatTransferText(expandedRoute.transferCount)}
+                            </ThemedText>
+                          </View>
+                          <Feather name="chevron-down" size={18} color={Colors.dark.text} />
+                        </TouchableOpacity>
+
+                        <View style={styles.expandedMetricRow}>
+                          <View style={styles.expandedMetricPill}>
+                            <ThemedText style={styles.expandedMetricValue}>{Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} min</ThemedText>
+                            <ThemedText style={styles.expandedMetricLabel}>{t("route.eta")}</ThemedText>
+                          </View>
+                          <View style={styles.expandedMetricPill}>
+                            <ThemedText style={styles.expandedMetricValue}>{expandedRoute.transferCount}</ThemedText>
+                            <ThemedText style={styles.expandedMetricLabel}>{t("route.transfers")}</ThemedText>
+                          </View>
+                          <View style={styles.expandedMetricPill}>
+                            <ThemedText style={styles.expandedMetricValue}>{Math.round(expandedRoute.walkingDistanceM)} m</ThemedText>
+                            <ThemedText style={styles.expandedMetricLabel}>{t("route.walk")}</ThemedText>
+                          </View>
+                        </View>
+
+                        <View style={styles.resultsListBlock}>
+                          <RouteStepsList
+                            routeResult={expandedRoute}
+                            activeStepIndex={focusedStepIndex}
+                            onStepPress={(segment, segmentIndex) =>
+                              focusRouteSegment(segment, segmentIndex)
+                            }
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.resultsListBlock}>
+                        {routeChoices.map((choice, index) => {
+                          const active = index === selectedAlternativeIndex;
+                          const walkCount = choice.segments.filter((segment) => segment.mode === "walk").length;
+                          const busNames = choice.segments
+                            .filter((segment) => segment.mode === "bus" && segment.routeName)
+                            .map((segment) => segment.routeName as string);
+
+                          return (
+                            <TouchableOpacity
+                              key={`${choice.routeLabel ?? "choice"}-${index}`}
+                              style={[styles.routeCard, active && styles.routeCardActive]}
+                              onPress={() => {
+                                hapticSelection();
+                                setSelectedAlternativeIndex(index);
+                                setExpandedRouteIndex(index);
+                                setFocusedStepIndex(null);
+                              }}
+                              activeOpacity={0.85}
+                            >
+                              <View style={styles.routeCardTopRow}>
+                                <View style={styles.routePathRow}>
+                                  <View style={styles.modeChipWalk}>
+                                    <Ionicons name="walk-outline" size={12} color="#FFFFFF" />
+                                    <ThemedText style={styles.modeChipText}>{walkCount}</ThemedText>
+                                  </View>
+                                  {busNames.map((name, busIndex) => (
+                                    <React.Fragment key={`${choice.routeLabel ?? "choice"}-${name}-${busIndex}`}>
+                                      <Ionicons name="chevron-forward" size={12} color={Colors.dark.icon} />
+                                      <View style={styles.modeChipBus}>
+                                        <Ionicons name="bus-outline" size={12} color="#FFFFFF" />
+                                        <ThemedText style={styles.modeChipText}>{name}</ThemedText>
+                                      </View>
+                                    </React.Fragment>
+                                  ))}
+                                </View>
+                                <ThemedText style={styles.routeDurationText}>
+                                  {Math.max(1, Math.round(choice.etaSeconds / 60))} {t("route.min")}
+                                </ThemedText>
+                              </View>
+
+                              <ThemedText style={styles.routeWindowText}>
+                                {formatTransferText(choice.transferCount)} • {Math.round(choice.walkingDistanceM)} m {t("route.walk")}
+                              </ThemedText>
+                              <ThemedText style={styles.routeSubtitleText}>
+                                {choice.bestEffort ? t("home.results.liveFallback") : t("home.results.live")}
+                              </ThemedText>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
                   </View>
+                )}
+              </RoutePlannerControls>
 
-                  <RouteFeedbackPanel
-                    routeResult={routeResult}
-                    onOpen={() => {
-                      sheetScrollRef.current?.scrollToEnd({ animated: true });
-                    }}
-                  />
-
-                  <RouteStepsList
-                    routeResult={routeResult}
-                    pointColorByLabel={pointColorByLabel}
-                  />
-                </>
-              ) : null}
             </ScrollView>
           </View>
+          ) : null}
         </KeyboardAvoidingView>
+
+        <RoutePreferencesModal
+          visible={isPreferencesModalOpen}
+          onClose={() => setIsPreferencesModalOpen(false)}
+          onSaved={() => {
+            void routingPreferencesQuery.refetch();
+          }}
+        />
       </View>
     </SafeAreaView>
   );
@@ -807,6 +1698,421 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.dark.background,
   },
+  mapFabStack: {
+    position: "absolute",
+    right: 14,
+    top: 152,
+    gap: 10,
+  },
+  mapFabButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: TransitTheme.map.overlayBorder,
+    backgroundColor: TransitTheme.map.fabBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mapFabButtonActive: {
+    borderColor: Colors.dark.primary,
+    backgroundColor: TransitTheme.map.fabActiveBg,
+  },
+  mapFabButtonAccent: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: TransitTheme.map.fabAccentBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mapSegmentModeBadge: {
+    minWidth: 84,
+    minHeight: 28,
+    borderRadius: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.65)",
+    flexDirection: "row",
+    gap: 4,
+    maxWidth: 120,
+  },
+  mapSegmentHintBanner: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    top: 142,
+    zIndex: 15,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  mapSegmentHintText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
+  mapLoadingOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  segmentNodeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: TransitTheme.route.node,
+    borderWidth: 1,
+    borderColor: TransitTheme.route.nodeBorder,
+  },
+  segmentNodeDotWalk: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    borderColor: "rgba(15, 23, 42, 0.35)",
+  },
+  crosshairHeaderCard: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    top: 126,
+    height: 68,
+    borderRadius: 16,
+    backgroundColor: TransitTheme.map.overlayBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.map.overlayBorder,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+  },
+  crosshairHeaderTextWrap: {
+    gap: 2,
+  },
+  crosshairHeaderTitle: {
+    color: TransitTheme.map.overlayText,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  crosshairHeaderSubtitle: {
+    color: TransitTheme.map.overlaySubtext,
+    fontSize: 12,
+  },
+  crosshairCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fixedCrosshairWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "46%",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 7,
+  },
+  fixedPinIcon: {
+    marginBottom: -8,
+  },
+  crosshairFooter: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 78,
+    zIndex: 9,
+  },
+  originPanelBackdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.08)",
+  },
+  originPanel: {
+    position: "absolute",
+    zIndex: 25,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.bg,
+    padding: 14,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  originPanelBridge: {
+    position: "absolute",
+    top: -8,
+    left: 30,
+    width: 18,
+    height: 18,
+    borderTopLeftRadius: 4,
+    backgroundColor: TransitTheme.panel.bg,
+    borderLeftWidth: 1,
+    borderTopWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    transform: [{ rotate: "45deg" }],
+  },
+  originPanelSearchStack: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    overflow: "hidden",
+  },
+  originPanelSearchRow: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  originPanelSearchText: {
+    flex: 1,
+    color: TransitTheme.panel.title,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  originPanelSearchDivider: {
+    borderTopWidth: 1,
+    borderTopColor: TransitTheme.panel.border,
+  },
+  originPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  originPanelTitleWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  originPanelTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  originPanelSubtitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+  },
+  originPanelClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.cardBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+  },
+  crosshairSetButton: {
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.dark.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  crosshairSetButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  originModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.14)",
+    justifyContent: "flex-end",
+  },
+  originModalPanel: {
+    minHeight: "76%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.bg,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 26,
+    gap: 14,
+  },
+  originModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  originModalBackButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+  },
+  originInputWrap: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  originInputText: {
+    color: TransitTheme.panel.title,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  originActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  originActionButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  originActionButtonDisabled: {
+    opacity: 0.45,
+  },
+  originActionText: {
+    color: TransitTheme.panel.body,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  originFavoritesSection: {
+    gap: 8,
+  },
+  originFavoritesTitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  originFavoriteEmpty: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  originFavoriteEmptyText: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  originFavoriteRow: {
+    minHeight: 50,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  originFavoriteCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  originFavoriteLabel: {
+    color: TransitTheme.panel.title,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  originFavoriteMeta: {
+    color: TransitTheme.panel.caption,
+    fontSize: 11,
+  },
+  originRecentHeader: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  originRecentList: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+  },
+  originRecentRow: {
+    minHeight: 62,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  originRecentRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: TransitTheme.panel.border,
+  },
+  originRecentIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  originRecentTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  originRecentTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  originRecentSubtitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+  },
   keyboardAvoiding: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -814,14 +2120,29 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 12,
     right: 12,
-    bottom: 12,
+    bottom: 10,
     maxHeight: "62%",
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: TransitTheme.panel.bg,
     borderWidth: 1,
-    borderColor: Colors.dark.border,
+    borderColor: TransitTheme.panel.border,
     borderRadius: 14,
     padding: 12,
     gap: 8,
+  },
+  sheetDragHandleWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 10,
+    paddingBottom: 10,
+    minHeight: 44,
+    marginTop: -4,
+    marginBottom: -2,
+  },
+  sheetDragHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: TransitTheme.panel.border,
   },
   sheetExpanded: {
     maxHeight: "76%",
@@ -921,15 +2242,271 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginTop: 6,
-    backgroundColor: "#F3F6FF",
+    backgroundColor: TransitTheme.panel.cardBgActive,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   summaryText: {
-    color: Colors.dark.text,
+    color: TransitTheme.panel.body,
     fontSize: 12,
     fontWeight: "600",
+  },
+  resultsPanel: {
+    gap: 10,
+  },
+  resultsTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  resultsActionsCompactRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  resultsClearCompactButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    borderRadius: 999,
+    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  resultsClearCompactText: {
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  resultsPanelHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  resultsPanelTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 24,
+    fontWeight: "700",
+  },
+  resultsPanelSubtitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  resultsPanelActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  resultsIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routeSummaryTabs: {
+    flexDirection: "row",
+    gap: 8,
+    paddingTop: 2,
+  },
+  routeSummaryTab: {
+    minWidth: 80,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  routeSummaryTabActive: {
+    borderColor: Colors.dark.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  routeSummaryTabText: {
+    color: TransitTheme.panel.title,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  routeSummaryTabTextActive: {
+    color: Colors.dark.primary,
+  },
+  routeSummaryTabMeta: {
+    color: TransitTheme.panel.caption,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  routeSummaryTabMetaActive: {
+    color: TransitTheme.panel.body,
+  },
+  resultsListBlock: {
+    gap: 12,
+  },
+  resultsListContent: {
+    gap: 12,
+    paddingBottom: 6,
+  },
+  expandedRoutePanel: {
+    gap: 12,
+  },
+  expandedRouteHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: TransitTheme.panel.border,
+    paddingBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  expandedMetricRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  expandedMetricPill: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  expandedMetricValue: {
+    color: TransitTheme.panel.title,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  expandedMetricLabel: {
+    color: TransitTheme.panel.caption,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  routeCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 12,
+  },
+  routeCardActive: {
+    borderColor: Colors.dark.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  routeCardTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  routePathRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  modeChipWalk: {
+    borderRadius: 999,
+    backgroundColor: TransitTheme.panel.chipWalkBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  modeChipBus: {
+    borderRadius: 999,
+    backgroundColor: "#16A34A",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  modeChipText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  routeDurationText: {
+    color: TransitTheme.panel.title,
+    fontSize: 24,
+    fontWeight: "700",
+  },
+  routeWindowText: {
+    color: TransitTheme.panel.body,
+    fontSize: 13,
+    marginTop: 8,
+  },
+  routeSubtitleText: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  stepCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 12,
+  },
+  stepCardActive: {
+    borderColor: Colors.dark.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  stepCardRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  stepCardIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepCardIconBus: {
+    backgroundColor: "#16A34A",
+  },
+  stepCardIconWalk: {
+    backgroundColor: TransitTheme.panel.chipWalkBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+  },
+  stepCardBody: {
+    flex: 1,
+    gap: 2,
+  },
+  stepCardTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  stepCardTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 14,
+    fontWeight: "700",
+    flex: 1,
+  },
+  stepCardTime: {
+    color: TransitTheme.panel.body,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  stepCardSubtitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 12,
   },
   stepsWrap: {
     flex: 1,
@@ -937,14 +2514,6 @@ const styles = StyleSheet.create({
   },
   stepsContent: {
     paddingBottom: 10,
-  },
-  stepCard: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    backgroundColor: Colors.dark.background,
-    padding: 10,
-    marginBottom: 8,
   },
   stepPointsRow: {
     flexDirection: "row",

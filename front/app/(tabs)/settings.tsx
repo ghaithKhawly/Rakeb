@@ -6,9 +6,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Kinetic } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { HintBanner } from "@/components/ui/HintBanner";
 import { useAuth } from "@/hooks/AuthContext";
 import { useLanguage } from "@/hooks/LanguageContext";
 import { SettingsActionCard } from "@/components/settings/SettingsActionCard";
+import { hapticMedium, hapticSelection } from "@/utils/haptics";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -47,6 +49,11 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <HintBanner
+          title={t("settings.hint.title")}
+          message={t("settings.hint.message")}
+        />
+
         <View style={styles.section}>
           <ThemedText style={[styles.sectionLabel, isRTL && styles.textRtl]}>
             {t("settings.section.transportation")}
@@ -57,13 +64,6 @@ export default function SettingsScreen() {
             subtitle={t("settings.routes.subtitle")}
             isRTL={isRTL}
             onPress={() => router.push("/(settings)/routes")}
-          />
-          <SettingsActionCard
-            icon="options"
-            title={t("settings.preferences.title")}
-            subtitle={t("settings.preferences.subtitle")}
-            isRTL={isRTL}
-            onPress={() => router.push("/(settings)/preferences" as never)}
           />
           <SettingsActionCard
             icon="time"
@@ -89,6 +89,7 @@ export default function SettingsScreen() {
                   language === "en" && styles.languageButtonActive,
                 ]}
                 onPress={() => {
+                  hapticSelection();
                   void setLanguage("en");
                 }}
               >
@@ -107,6 +108,7 @@ export default function SettingsScreen() {
                   language === "ar" && styles.languageButtonActive,
                 ]}
                 onPress={() => {
+                  hapticSelection();
                   void setLanguage("ar");
                 }}
               >
@@ -127,6 +129,7 @@ export default function SettingsScreen() {
           style={styles.signOutButton}
           activeOpacity={0.85}
           onPress={() => {
+            hapticMedium();
             void signOut();
           }}
         >

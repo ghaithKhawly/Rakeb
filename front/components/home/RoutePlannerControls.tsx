@@ -1,208 +1,184 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { Colors } from "@/constants/theme";
+import { Colors, Kinetic, TransitTheme } from "@/constants/theme";
+import { PrimaryButton } from "@/components/PrimaryButton";
 import { ThemedText } from "@/components/themed-text";
 import { useLanguage } from "@/hooks/LanguageContext";
+import { hapticMedium, hapticSelection } from "@/utils/haptics";
+
+type RouteFilterValue =
+  | "balanced"
+  | "fastest"
+  | "fewestTransfers"
+  | "lessWalking"
+  | "cheapest"
+  | "lessCrowded";
+
+const FILTER_CHIPS: Array<{ key: RouteFilterValue; labelKey: string }> = [
+  { key: "balanced", labelKey: "planner.filter.balanced" },
+  { key: "fastest", labelKey: "planner.filter.fastest" },
+  { key: "fewestTransfers", labelKey: "planner.filter.fewestTransfers" },
+  { key: "lessWalking", labelKey: "planner.filter.lessWalking" },
+  { key: "cheapest", labelKey: "planner.filter.cheapest" },
+  { key: "lessCrowded", labelKey: "planner.filter.lessCrowded" },
+];
 
 type RoutePlannerControlsProps = {
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
-  isPreferencesLoading: boolean;
-  hasSavedPreferences: boolean;
-  startLabel: string;
-  destinationLabel: string;
-  mapSelectionMode: "start" | "destination";
-  onChangeMapSelectionMode: (mode: "start" | "destination") => void;
-  routeLocked: boolean;
+  onOpenPreferences: () => void;
+  activeFilter: RouteFilterValue;
+  onChangeFilter: (value: RouteFilterValue) => void;
+  isUpdatingFilter: boolean;
   onRequestRoute: () => void;
   isRouting: boolean;
-  naturalRouteText: string;
-  onChangeNaturalRouteText: (value: string) => void;
-  onSubmitNaturalRouteText: () => void;
-  isParsingNaturalRoute: boolean;
   onClearRoute: () => void;
   errorMessage: string | null;
+  showActionButtons?: boolean;
+  children?: React.ReactNode;
 };
 
 export function RoutePlannerControls({
   isCollapsed,
   onToggleCollapsed,
-  isPreferencesLoading,
-  hasSavedPreferences,
-  startLabel,
-  destinationLabel,
-  mapSelectionMode,
-  onChangeMapSelectionMode,
-  routeLocked,
+  onOpenPreferences,
+  activeFilter,
+  onChangeFilter,
+  isUpdatingFilter,
   onRequestRoute,
   isRouting,
-  naturalRouteText,
-  onChangeNaturalRouteText,
-  onSubmitNaturalRouteText,
-  isParsingNaturalRoute,
   onClearRoute,
   errorMessage,
+  showActionButtons = true,
+  children,
 }: RoutePlannerControlsProps) {
-  const { isRTL, t } = useLanguage();
+  const { t } = useLanguage();
+  const panelAnimation = useRef(new Animated.Value(isCollapsed ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.timing(panelAnimation, {
+      toValue: isCollapsed ? 0 : 1,
+      duration: 220,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [isCollapsed, panelAnimation]);
+
+  const panelMotionStyle = {
+    opacity: panelAnimation,
+    transform: [
+      {
+        translateY: panelAnimation.interpolate({
+          inputRange: [0, 1],
+          outputRange: [10, 0],
+        }),
+      },
+      {
+        scale: panelAnimation.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.985, 1],
+        }),
+      },
+    ],
+  } as const;
 
   return (
     <>
       <View style={styles.sheetHeaderRow}>
-        <ThemedText type="defaultSemiBold" style={styles.title}>
-          {t("planner.title")}
-        </ThemedText>
-        <TouchableOpacity
-          style={styles.sheetToggleButton}
-          onPress={onToggleCollapsed}
-        >
-          <Ionicons
-            name={isCollapsed ? "chevron-up" : "chevron-down"}
-            size={18}
-            color={Colors.dark.text}
-          />
-        </TouchableOpacity>
+        <ThemedText type="defaultSemiBold" style={styles.title}>{t("planner.actions")}</ThemedText>
+        <View style={styles.sheetHeaderActions}>
+          <TouchableOpacity
+            style={styles.preferencesButton}
+            onPress={() => {
+              hapticSelection();
+              onOpenPreferences();
+            }}
+          >
+            <Ionicons name="options-outline" size={15} color={Colors.dark.primary} />
+            <ThemedText style={styles.preferencesButtonText}>{t("planner.preferences")}</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetToggleButton}
+            onPress={() => {
+              hapticMedium();
+              onToggleCollapsed();
+            }}
+          >
+            <Ionicons
+              name={isCollapsed ? "chevron-up" : "chevron-down"}
+              size={18}
+              color={Colors.dark.text}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ThemedText style={styles.prefStatusText}>
-        {isPreferencesLoading
-          ? t("planner.pref.loading")
-          : hasSavedPreferences
-            ? t("planner.pref.saved")
-            : t("planner.pref.defaults")}
-      </ThemedText>
-
       {!isCollapsed ? (
-        <>
-          <ThemedText style={[styles.metaText, isRTL && styles.textRtl]}>
-            {t("planner.start")}: {startLabel}
-          </ThemedText>
-          <ThemedText style={styles.metaText}>
-            {t("planner.destination")}: {destinationLabel}
-          </ThemedText>
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mapSelectionMode === "start" && styles.modeButtonActive,
-              ]}
-              onPress={() => onChangeMapSelectionMode("start")}
-            >
-              <ThemedText
-                style={[
-                  styles.modeButtonText,
-                  mapSelectionMode === "start" && styles.modeButtonTextActive,
-                ]}
-              >
-                {t("planner.tapStart")}
-              </ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                mapSelectionMode === "destination" && styles.modeButtonActive,
-              ]}
-              onPress={() => onChangeMapSelectionMode("destination")}
-            >
-              <ThemedText
-                style={[
-                  styles.modeButtonText,
-                  mapSelectionMode === "destination" &&
-                    styles.modeButtonTextActive,
-                ]}
-              >
-                {t("planner.tapDestination")}
-              </ThemedText>
-            </TouchableOpacity>
+        <Animated.View style={[styles.panelBody, panelMotionStyle]}>
+          <View style={styles.filterWrap}>
+            {FILTER_CHIPS.map((chip) => {
+              const selected = activeFilter === chip.key;
+              return (
+                <TouchableOpacity
+                  key={chip.key}
+                  style={[styles.filterChip, selected && styles.filterChipSelected]}
+                  onPress={() => {
+                    if (!selected) {
+                      hapticSelection();
+                      onChangeFilter(chip.key);
+                    }
+                  }}
+                  disabled={isUpdatingFilter || isRouting}
+                  activeOpacity={0.85}
+                >
+                  <ThemedText
+                    style={[styles.filterChipText, selected && styles.filterChipTextSelected]}
+                  >
+                    {t(chip.labelKey)}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {routeLocked ? (
-            <ThemedText style={styles.metaText}>
-              {t("planner.locked")}
-            </ThemedText>
+          {showActionButtons ? (
+            <View style={styles.buttonRow}>
+              <PrimaryButton
+                title={t("planner.request")}
+                variant="primary"
+                loading={isRouting}
+                icon={<Ionicons name="navigate" size={16} color={Colors.dark.background} />}
+                onPress={onRequestRoute}
+                style={styles.primaryButton}
+                textStyle={styles.primaryButtonText}
+                disabled={isUpdatingFilter}
+              />
+
+              <PrimaryButton
+                title={t("planner.clear")}
+                variant="secondary"
+                disabled={isRouting || isUpdatingFilter}
+                onPress={onClearRoute}
+                style={styles.secondaryButton}
+                textStyle={styles.secondaryButtonText}
+              />
+            </View>
           ) : null}
 
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={onRequestRoute}
-              disabled={isRouting || isParsingNaturalRoute}
-            >
-              {isRouting ? (
-                <ActivityIndicator
-                  size="small"
-                  color={Colors.dark.background}
-                />
-              ) : (
-                <>
-                  <Ionicons
-                    name="navigate"
-                    size={16}
-                    color={Colors.dark.background}
-                  />
-                  <ThemedText style={styles.primaryButtonText}>
-                    {t("planner.request")}
-                  </ThemedText>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={onClearRoute}
-            >
-              <ThemedText style={styles.secondaryButtonText}>
-                {t("planner.clear")}
-              </ThemedText>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.textRouteRow}>
-            <TextInput
-              value={naturalRouteText}
-              onChangeText={onChangeNaturalRouteText}
-              placeholder={t("planner.textPlaceholder")}
-              placeholderTextColor="#6B7280"
-              style={styles.textRouteInput}
-              editable={!isParsingNaturalRoute && !isRouting}
-              returnKeyType="send"
-              blurOnSubmit
-              onSubmitEditing={onSubmitNaturalRouteText}
-              autoCapitalize="none"
-              autoCorrect={false}
-              selectionColor={Colors.dark.primary}
-              cursorColor={Colors.dark.primary}
-              textAlign="left"
-            />
-            <TouchableOpacity
-              style={styles.textRouteButton}
-              onPress={onSubmitNaturalRouteText}
-              disabled={isParsingNaturalRoute || isRouting}
-            >
-              {isParsingNaturalRoute ? (
-                <ActivityIndicator
-                  size="small"
-                  color={Colors.dark.background}
-                />
-              ) : (
-                <ThemedText style={styles.textRouteButtonText}>
-                  {t("planner.useText")}
-                </ThemedText>
-              )}
-            </TouchableOpacity>
-          </View>
+          {children ? <View style={styles.contentSlot}>{children}</View> : null}
 
           {errorMessage ? (
             <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
           ) : null}
-        </>
+        </Animated.View>
       ) : null}
     </>
   );
@@ -210,130 +186,95 @@ export function RoutePlannerControls({
 
 const styles = StyleSheet.create({
   title: {
-    color: Colors.dark.text,
-    fontSize: 16,
+    color: TransitTheme.panel.title,
+    fontSize: 15,
   },
   sheetHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  sheetHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  preferencesButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: TransitTheme.panel.cardBg,
+  },
+  preferencesButtonText: {
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   sheetToggleButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.dark.border,
+    borderColor: TransitTheme.panel.border,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.dark.background,
-  },
-  metaText: {
-    color: Colors.dark.icon,
-    fontSize: 12,
-  },
-  textRtl: {
-    textAlign: "right",
-  },
-  prefStatusText: {
-    color: Colors.dark.primary,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  modeRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 2,
-  },
-  modeButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.dark.background,
-  },
-  modeButtonActive: {
-    borderColor: Colors.dark.primary,
-    backgroundColor: "rgba(45, 212, 191, 0.15)",
-  },
-  modeButtonText: {
-    color: Colors.dark.icon,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  modeButtonTextActive: {
-    color: Colors.dark.text,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
   },
   buttonRow: {
     flexDirection: "row",
     gap: 8,
-    marginTop: 4,
+  },
+  filterWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  filterChipSelected: {
+    borderColor: Kinetic.primary,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  filterChipText: {
+    color: TransitTheme.panel.caption,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  filterChipTextSelected: {
+    color: TransitTheme.panel.title,
   },
   primaryButton: {
     flex: 1,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: Colors.dark.primary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
   },
   primaryButtonText: {
-    color: Colors.dark.background,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    width: 88,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryButtonText: {
-    color: Colors.dark.text,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  textRouteRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 2,
-  },
-  textRouteInput: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#9CA3AF",
-    paddingHorizontal: 12,
-    backgroundColor: "#FFFFFF",
-    color: "#111827",
     fontSize: 14,
   },
-  textRouteButton: {
-    width: 94,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: Colors.dark.primary,
-    alignItems: "center",
-    justifyContent: "center",
+  secondaryButton: {
+    flex: 1,
   },
-  textRouteButtonText: {
-    color: Colors.dark.background,
-    fontSize: 12,
-    fontWeight: "700",
+  secondaryButtonText: {
+    fontSize: 14,
   },
   errorText: {
-    color: "#F87171",
+    color: Kinetic.state.error,
     fontSize: 12,
+  },
+  contentSlot: {
+    marginTop: 2,
+  },
+  panelBody: {
+    gap: 8,
+    marginTop: 8,
   },
 });
