@@ -6,6 +6,7 @@ import { RouteStepsList } from "@/components/home/RouteStepsList";
 import { ThemedText } from "@/components/themed-text";
 import { Kinetic, TransitTheme } from "@/constants/theme";
 import { hapticSelection, hapticSuccess } from "@/utils/haptics";
+import { getRouteTransferCount } from "@/utils/homeScreenUtils";
 
 import type { NavigationRouteResult } from "../../types/navigation";
 
@@ -33,14 +34,15 @@ export function RouteCard({
   const isExpanded = controlledExpanded ?? internalExpanded;
 
   const totalMinutes = Math.max(1, Math.round(route.etaSeconds / 60));
+  const transferCount = getRouteTransferCount(route);
 
   const summaryChips = useMemo(
     () => [
       { label: "ETA", value: `${totalMinutes} min` },
-      { label: "Transfers", value: `${route.transferCount}` },
+      { label: "Transfers", value: `${transferCount}` },
       { label: "Walking", value: `${Math.round(route.walkingDistanceM)} m` },
     ],
-    [route.transferCount, route.walkingDistanceM, totalMinutes],
+    [route.walkingDistanceM, totalMinutes, transferCount],
   );
 
   const toggleExpanded = () => {

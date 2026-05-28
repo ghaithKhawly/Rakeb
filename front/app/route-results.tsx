@@ -12,6 +12,7 @@ import { RouteStepsList } from '@/components/home/RouteStepsList';
 import { HintBanner } from '@/components/ui/HintBanner';
 import MapView, { Marker, Polyline } from '@/components/maps/MapViewCompat';
 import { getSegmentColor } from '@/utils/routeColors';
+import { getRouteTransferCount } from '@/utils/homeScreenUtils';
 import { useRoutePlanning } from '@/hooks/RoutePlanningContext';
 import { goHome } from '@/utils/navigation';
 import { hapticSelection } from '@/utils/haptics';
@@ -108,6 +109,7 @@ export default function RouteResultsScreen() {
 
   const activeRoute = selectedRoute ?? activeRouteSource;
   const routeSegments = useMemo(() => (activeRoute?.segments ?? []) as RouteSegment[], [activeRoute]);
+  const transferCount = activeRoute ? getRouteTransferCount(activeRoute) : 0;
   const routeSegmentsWithColor = useMemo(
     () =>
       routeSegments.map((segment, index) => ({
@@ -269,7 +271,7 @@ export default function RouteResultsScreen() {
           <View>
             <ThemedText style={styles.sheetTitle}>{Math.max(1, Math.round(activeRoute.etaSeconds / 60))} min</ThemedText>
             <ThemedText style={styles.sheetSubtitle}>
-              Transfers: {activeRoute.transferCount} • Walk {Math.round(activeRoute.walkingDistanceM)}m
+              Transfers: {transferCount} • Walk {Math.round(activeRoute.walkingDistanceM)}m
             </ThemedText>
           </View>
           <View style={styles.sheetActionRow}>
@@ -324,7 +326,7 @@ export default function RouteResultsScreen() {
               </View>
               <View style={styles.routeOverviewStats}>
                 <ThemedText style={styles.routeOverviewEta}>{Math.max(1, Math.round(activeRoute.etaSeconds / 60))} min</ThemedText>
-                <ThemedText style={styles.routeOverviewMeta}>Transfers: {activeRoute.transferCount}</ThemedText>
+                <ThemedText style={styles.routeOverviewMeta}>Transfers: {transferCount}</ThemedText>
                 <ThemedText style={styles.routeOverviewMeta}>Walk {Math.round(activeRoute.walkingDistanceM)}m</ThemedText>
               </View>
             </View>

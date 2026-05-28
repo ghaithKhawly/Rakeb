@@ -25,6 +25,26 @@ import {
 
 type RouteProfile = ReturnType<typeof buildAlternativeProfiles>[number];
 
+function scoreProfileCandidate(profileId: string, route: NavigationRouteResult): number {
+  const transferCount = Number(route.transferCount ?? 0);
+  const eta = Number(route.etaSeconds ?? Number.POSITIVE_INFINITY);
+  const walking = Number(route.walkingDistanceM ?? Number.POSITIVE_INFINITY);
+  const totalCost = Number(route.totalCost ?? Number.POSITIVE_INFINITY);
+
+  switch (profileId) {
+    case "fastest":
+      return eta * 1_000 + walking * 5 + transferCount * 25_000;
+    case "fewer_transfers":
+      return transferCount * 1_000_000_000 + eta * 1_000 + walking * 10;
+    case "less_walking":
+      return walking * 1_000 + eta * 10 + transferCount * 25_000;
+    case "cheaper":
+      return totalCost * 1_000 + eta * 10 + transferCount * 10_000;
+    default:
+      return eta * 1_000 + walking;
+  }
+}
+
 async function computeNavigationAlternatives(
   fastify: FastifyInstance,
   snapshot: Awaited<ReturnType<typeof graphCache.getSnapshot>>,
@@ -57,6 +77,8 @@ async function computeNavigationAlternatives(
   for (const profile of altProfiles) {
     const profileConfig = applyProfileConfig(config, profile);
     const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+    let bestCandidate: NavigationRouteResult | null = null;
+    let bestCandidateScore = Number.POSITIVE_INFINITY;
 
     for (const walkingMode of candidateWalkingModes) {
       try {
@@ -85,9 +107,11 @@ async function computeNavigationAlternatives(
           continue;
         }
 
-        seenFingerprints.add(fingerprint);
-        alternatives.push(normalizedResult);
-        break;
+        const candidateScore = scoreProfileCandidate(profile.id, normalizedResult);
+        if (candidateScore < bestCandidateScore) {
+          bestCandidate = normalizedResult;
+          bestCandidateScore = candidateScore;
+        }
       } catch (error) {
         fastify.log.warn(
           {
@@ -98,6 +122,11 @@ async function computeNavigationAlternatives(
           "Alternative routing profile failed",
         );
       }
+    }
+
+    if (bestCandidate) {
+      seenFingerprints.add(routeFingerprint(bestCandidate));
+      alternatives.push(bestCandidate);
     }
 
     if (alternatives.length >= 4) {
@@ -355,6 +384,8 @@ async function computeQuickRouteAlternatives(
   for (const profile of altProfiles) {
     const profileConfig = applyProfileConfig(config, profile);
     const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+    let bestCandidate: NavigationRouteResult | null = null;
+    let bestCandidateScore = Number.POSITIVE_INFINITY;
 
     for (const walkingMode of candidateWalkingModes) {
       try {
@@ -383,9 +414,11 @@ async function computeQuickRouteAlternatives(
           continue;
         }
 
-        seenFingerprints.add(fingerprint);
-        alternatives.push(normalizedResult);
-        break;
+        const candidateScore = scoreProfileCandidate(profile.id, normalizedResult);
+        if (candidateScore < bestCandidateScore) {
+          bestCandidate = normalizedResult;
+          bestCandidateScore = candidateScore;
+        }
       } catch (error) {
         fastify.log.warn(
           {
@@ -396,6 +429,11 @@ async function computeQuickRouteAlternatives(
           "Alternative routing profile failed",
         );
       }
+    }
+
+    if (bestCandidate) {
+      seenFingerprints.add(routeFingerprint(bestCandidate));
+      alternatives.push(bestCandidate);
     }
 
     if (alternatives.length >= 4) {

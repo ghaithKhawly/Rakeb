@@ -135,6 +135,51 @@ export function getSelectedRoute(
   return routeResult;
 }
 
+type RouteTransferCountSource = {
+  transferCount?: number | null;
+  segments?: Array<{
+    mode?: string;
+    routeId?: number | null;
+  }>;
+};
+
+function deriveTransferCountFromSegments(route: RouteTransferCountSource): number {
+  let transferCount = 0;
+  let previousBusRouteId: number | null = null;
+
+  for (const segment of route.segments ?? []) {
+    if (segment.mode !== "bus" || typeof segment.routeId !== "number") {
+      continue;
+    }
+
+    if (previousBusRouteId !== null && previousBusRouteId !== segment.routeId) {
+      transferCount += 1;
+    }
+
+    previousBusRouteId = segment.routeId;
+  }
+
+  return transferCount;
+}
+
+export function getRouteTransferCount(route: RouteTransferCountSource): number {
+  const reportedTransferCount =
+    typeof route.transferCount === "number" && Number.isFinite(route.transferCount)
+      ? route.transferCount
+      : null;
+  const derivedTransferCount = deriveTransferCountFromSegments(route);
+
+  if (reportedTransferCount === null) {
+    return derivedTransferCount;
+  }
+
+  if (reportedTransferCount <= 0 && derivedTransferCount > 0) {
+    return derivedTransferCount;
+  }
+
+  return reportedTransferCount;
+}
+
 export function extractApiErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
     const data = error.response?.data as

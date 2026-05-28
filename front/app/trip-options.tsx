@@ -16,7 +16,31 @@ type RouteCandidate = {
   transferCount: number;
   walkingDistanceM: number;
   bestEffort: boolean;
+  segments?: Array<{ mode: string; routeId: number | null }>;
 };
+
+type RankedRouteCandidate = RouteCandidate & {
+  originalIndex: number;
+};
+
+function getCandidateTransferCount(route: RouteCandidate): number {
+  let transferCount = 0;
+  let previousBusRouteId: number | null = null;
+
+  for (const segment of route.segments ?? []) {
+    if (segment.mode !== 'bus' || typeof segment.routeId !== 'number') {
+      continue;
+    }
+
+    if (previousBusRouteId !== null && previousBusRouteId !== segment.routeId) {
+      transferCount += 1;
+    }
+
+    previousBusRouteId = segment.routeId;
+  }
+
+  return transferCount;
+}
 
 const FILTER_OPTIONS: Array<{ key: FilterBy; label: string; helper?: string }> = [
   { key: 'best', label: 'Best route' },
@@ -49,36 +73,37 @@ function RadioRow({
   );
 }
 
-function pickRouteIndex(options: RouteCandidate[], filterBy: FilterBy): number {
-  if (options.length === 0) {
-    return 0;
-  }
-
+function compareRankedCandidates(
+  left: RankedRouteCandidate,
+  right: RankedRouteCandidate,
+  filterBy: FilterBy,
+): number {
   if (filterBy === 'best') {
-    return 0;
+    return left.originalIndex - right.originalIndex;
   }
 
-  let bestIndex = 0;
-  let bestScore = Number.POSITIVE_INFINITY;
+  const leftTransfers = getCandidateTransferCount(left);
+  const rightTransfers = getCandidateTransferCount(right);
 
-  options.forEach((option, index) => {
-    let score = option.etaSeconds;
+  if (filterBy === 'fewest') {
+    return leftTransfers - rightTransfers
+      || left.transferCount - right.transferCount
+      || left.walkingDistanceM - right.walkingDistanceM
+      || left.originalIndex - right.originalIndex;
+  }
 
-    if (filterBy === 'fewest') {
-      score = option.transferCount * 10_000 + option.etaSeconds;
-    } else if (filterBy === 'less-walk') {
-      score = option.walkingDistanceM * 10 + option.etaSeconds;
-    } else if (filterBy === 'wheelchair') {
-      score = option.bestEffort ? option.etaSeconds : option.etaSeconds + 1_000_000;
-    }
+  if (filterBy === 'less-walk') {
+    return left.walkingDistanceM - right.walkingDistanceM
+      || left.etaSeconds - right.etaSeconds
+      || leftTransfers - rightTransfers
+      || left.originalIndex - right.originalIndex;
+  }
 
-    if (score < bestScore) {
-      bestScore = score;
-      bestIndex = index;
-    }
-  });
-
-  return bestIndex;
+  return (Number(right.bestEffort) - Number(left.bestEffort))
+    || left.etaSeconds - right.etaSeconds
+    || leftTransfers - rightTransfers
+    || left.walkingDistanceM - right.walkingDistanceM
+    || left.originalIndex - right.originalIndex;
 }
 
 export default function TripOptionsScreen() {
@@ -86,20 +111,25 @@ export default function TripOptionsScreen() {
   const { routeOptions, setSelectedRouteIndex } = useRoutePlanning();
   const [filterBy, setFilterBy] = useState<FilterBy>((params.filterBy as FilterBy) ?? 'best');
 
+  const rankedOptions = useMemo(() => {
+    return routeOptions
+      .map((option, originalIndex) => ({ ...option, originalIndex }))
+      .sort((left, right) => compareRankedCandidates(left, right, filterBy));
+  }, [filterBy, routeOptions]);
+
   const activeRouteSummary = useMemo(() => {
-    if (routeOptions.length === 0) {
+    if (rankedOptions.length === 0) {
       return 'Choose a destination and origin first.';
     }
 
-    const selectedIndex = pickRouteIndex(routeOptions as RouteCandidate[], filterBy);
-    const selected = routeOptions[selectedIndex];
-    return `${Math.max(1, Math.round(selected.etaSeconds / 60))} min • ${selected.transferCount} transfers • ${Math.round(selected.walkingDistanceM)}m walk`;
-  }, [filterBy, routeOptions]);
+    const selected = rankedOptions[0];
+    const transferCount = getCandidateTransferCount(selected);
+    return `${Math.max(1, Math.round(selected.etaSeconds / 60))} min • ${transferCount} transfers • ${Math.round(selected.walkingDistanceM)}m walk`;
+  }, [rankedOptions]);
 
   const handleApply = () => {
-    if (routeOptions.length > 0) {
-      const selectedIndex = pickRouteIndex(routeOptions as RouteCandidate[], filterBy);
-      setSelectedRouteIndex(selectedIndex);
+    if (rankedOptions.length > 0) {
+      setSelectedRouteIndex(rankedOptions[0].originalIndex);
     }
     goHome(router);
   };
@@ -128,6 +158,11 @@ export default function TripOptionsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Active route</Text>
           <Text style={styles.sectionSubtitle}>{activeRouteSummary}</Text>
+          {rankedOptions.length > 0 ? (
+            <Text style={styles.sectionHint}>
+              Top pick: {Math.max(1, Math.round(rankedOptions[0].etaSeconds / 60))} min, {getCandidateTransferCount(rankedOptions[0])} transfers
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -214,6 +249,11 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     color: Kinetic.onSurfaceVariant,
     fontSize: 13,
+  },
+  sectionHint: {
+    color: Kinetic.primary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   radioRow: {
     minHeight: 50,

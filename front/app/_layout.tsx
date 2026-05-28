@@ -29,15 +29,12 @@ function RootLayoutNav() {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === "(tabs)";
+    const currentRoute = segments[0];
+    const isPublicRoute = currentRoute === "login" || currentRoute === "route-share";
 
-    if (isLoading) return;
-
-    if (!user && inAuthGroup) {
-      // Redirect to the login page if not authenticated
+    if (!user && !isPublicRoute) {
       router.replace("/login");
     } else if (user && segments[0] === "login") {
-      // Redirect to the home page if authenticated
       router.replace("/(tabs)");
     }
   }, [user, segments, isLoading, router]);

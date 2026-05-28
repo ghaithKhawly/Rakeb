@@ -92,6 +92,25 @@ export function normalizeRouteSegment(
   };
 }
 
+function deriveTransferCount(segments: RouteSegment[]): number {
+  let transferCount = 0;
+  let previousBusRouteId: number | null = null;
+
+  for (const segment of segments) {
+    if (segment.mode !== "bus" || typeof segment.routeId !== "number") {
+      continue;
+    }
+
+    if (previousBusRouteId !== null && previousBusRouteId !== segment.routeId) {
+      transferCount += 1;
+    }
+
+    previousBusRouteId = segment.routeId;
+  }
+
+  return transferCount;
+}
+
 export function normalizeRouteResultForSchema(
   result: NavigationRouteResult,
   requestFrom: { lat: number; lng: number; label?: string },
@@ -108,6 +127,7 @@ export function normalizeRouteResultForSchema(
       normalizeRouteSegment(segment, baseFrom, baseTo),
     ),
   };
+  normalizedResult.transferCount = deriveTransferCount(normalizedResult.segments);
 
   const normalizedRoutes = Array.isArray(result.routes)
     ? result.routes.map((route) => ({
@@ -120,6 +140,12 @@ export function normalizeRouteResultForSchema(
     }))
     : null;
 
+  if (normalizedRoutes) {
+    for (const route of normalizedRoutes) {
+      route.transferCount = deriveTransferCount(route.segments);
+    }
+  }
+
   const normalizedAlternatives = Array.isArray(result.alternatives)
     ? result.alternatives.map((route) => ({
       ...route,
@@ -130,6 +156,12 @@ export function normalizeRouteResultForSchema(
       ),
     }))
     : null;
+
+  if (normalizedAlternatives) {
+    for (const route of normalizedAlternatives) {
+      route.transferCount = deriveTransferCount(route.segments);
+    }
+  }
 
   return {
     ...normalizedResult,
@@ -287,8 +319,9 @@ export function buildAlternativeProfiles(baseWeights: RoutingPreferenceWeights) 
       label: "Less Walking",
       weights: normalizeWeights({
         ...balanced,
-        walking: balanced.walking * 3.2,
-        speed: balanced.speed * 1.1,
+        walking: balanced.walking * 4.0,
+        speed: balanced.speed * 1.0,
+        transfer: balanced.transfer * 0.9,
       }),
     },
     {
@@ -296,8 +329,9 @@ export function buildAlternativeProfiles(baseWeights: RoutingPreferenceWeights) 
       label: "Fewer Transfers",
       weights: normalizeWeights({
         ...balanced,
-        transfer: balanced.transfer * 3.0,
-        walking: balanced.walking * 1.3,
+        transfer: balanced.transfer * 5.0,
+        walking: balanced.walking * 1.1,
+        speed: balanced.speed * 0.85,
       }),
     },
     {
@@ -314,9 +348,11 @@ export function buildAlternativeProfiles(baseWeights: RoutingPreferenceWeights) 
       label: "Fastest",
       weights: normalizeWeights({
         ...balanced,
-        speed: balanced.speed * 3.2,
-        transfer: balanced.transfer * 0.8,
-        walking: balanced.walking * 0.7,
+        speed: balanced.speed * 5.0,
+        transfer: balanced.transfer * 0.35,
+        walking: balanced.walking * 0.5,
+        crowding: balanced.crowding * 0.85,
+        price: balanced.price * 0.85,
       }),
     },
   ];

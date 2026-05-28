@@ -4,6 +4,7 @@ import {
   useQueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/AuthContext";
 
 import {
   computeNavigationRoute,
@@ -61,9 +62,11 @@ function invalidate(queryClient: ReturnType<typeof useQueryClient>, key: QueryKe
 }
 
 export function useBusses(query: GetBusesQuery = {}) {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.busses(query),
     queryFn: () => getBusses(query),
+    enabled: !!token,
   });
 }
 
@@ -76,30 +79,38 @@ export function useBusById(id?: number) {
 }
 
 export function useGraphCacheStatus(query: GraphCacheQuery = {}) {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.graphCacheStatus(query),
     queryFn: () => getGraphCacheStatus(query),
+    enabled: !!token,
   });
 }
 
 export function useGraphSnapshot(query: GetGraphQuery = {}) {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.graphSnapshot(query),
     queryFn: () => getGraphSnapshot(query),
+    enabled: !!token,
   });
 }
 
 export function useUserTravelHistory(query: GetUserTravelHistoryQuery = {}) {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.travelHistory(query),
     queryFn: () => getUserTravelHistory(query),
+    enabled: !!token,
   });
 }
 
 export function useRouteLiveMetrics(query: GetRouteLiveMetricsQuery = {}) {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.routeLiveMetrics(query),
     queryFn: () => getRouteLiveMetrics(query),
+    enabled: !!token,
   });
 }
 
@@ -203,9 +214,11 @@ export function useIncreaseBusPricesMutation() {
 }
 
 export function useRoutingPreferences() {
+  const { token } = useAuth();
   return useQuery({
     queryKey: busApiKeys.routingPreferences(),
     queryFn: () => getRoutingPreferences(),
+    enabled: !!token,
   });
 }
 

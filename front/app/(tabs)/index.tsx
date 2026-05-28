@@ -22,7 +22,6 @@ import type { Region } from "@/components/maps/MapViewCompat";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 import type { LocationDTO } from "../../../types/location";
 import type {
   NavigationRouteRequestBody,
@@ -46,7 +45,7 @@ import { useLanguage } from "@/hooks/LanguageContext";
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "@/utils/haptics";
 import {
   extractApiErrorMessage,
-  getSelectedRoute,
+  getRouteTransferCount,
   INITIAL_REGION,
   POINT_COLORS,
   pointId,
@@ -83,6 +82,10 @@ type FavoriteOrigin = {
   lat: number;
   lng: number;
   updatedAt: number;
+};
+
+type RankedRouteChoice = NavigationRouteResult & {
+  originalIndex: number;
 };
 
 function normalizePreferenceWeights(weights: {
@@ -142,6 +145,60 @@ function nearestRouteFilter(weights: {
   }
 
   return bestFilter;
+}
+
+function compareRouteChoices(
+  left: RankedRouteChoice,
+  right: RankedRouteChoice,
+  filter: RouteFilterValue,
+): number {
+  if (filter === "balanced") {
+    return left.originalIndex - right.originalIndex;
+  }
+
+  const leftTransfers = getRouteTransferCount(left);
+  const rightTransfers = getRouteTransferCount(right);
+  const leftWalking = left.walkingDistanceM;
+  const rightWalking = right.walkingDistanceM;
+  const leftEta = left.etaSeconds;
+  const rightEta = right.etaSeconds;
+  const leftPrice = Number(left.components?.price ?? Number.POSITIVE_INFINITY);
+  const rightPrice = Number(right.components?.price ?? Number.POSITIVE_INFINITY);
+  const leftCrowding = Number(left.components?.crowding ?? Number.POSITIVE_INFINITY);
+  const rightCrowding = Number(right.components?.crowding ?? Number.POSITIVE_INFINITY);
+
+  if (filter === "fewestTransfers") {
+    return leftTransfers - rightTransfers
+      || leftEta - rightEta
+      || leftWalking - rightWalking
+      || left.originalIndex - right.originalIndex;
+  }
+
+  if (filter === "lessWalking") {
+    return leftWalking - rightWalking
+      || leftTransfers - rightTransfers
+      || leftEta - rightEta
+      || left.originalIndex - right.originalIndex;
+  }
+
+  if (filter === "cheapest") {
+    return leftPrice - rightPrice
+      || leftEta - rightEta
+      || leftTransfers - rightTransfers
+      || left.originalIndex - right.originalIndex;
+  }
+
+  if (filter === "lessCrowded") {
+    return leftCrowding - rightCrowding
+      || leftEta - rightEta
+      || leftTransfers - rightTransfers
+      || left.originalIndex - right.originalIndex;
+  }
+
+  return leftEta - rightEta
+    || leftTransfers - rightTransfers
+    || leftWalking - rightWalking
+    || left.originalIndex - right.originalIndex;
 }
 
 export default function HomeScreen() {
@@ -214,10 +271,6 @@ export default function HomeScreen() {
   };
 
   const isCrosshairMode = selectionPhase === "origin_map";
-  const selectedRoute = useMemo(
-    () => getSelectedRoute(routeResult, selectedAlternativeIndex),
-    [routeResult, selectedAlternativeIndex],
-  );
 
   const routeChoices = useMemo(() => {
     if (!routeResult) {
@@ -231,8 +284,17 @@ export default function HomeScreen() {
     return [routeResult, ...(routeResult.alternatives ?? [])];
   }, [routeResult]);
 
+  const rankedRouteChoices = useMemo(() => {
+    return routeChoices
+      .map((choice, originalIndex) => ({ ...choice, originalIndex }))
+      .sort((left, right) => compareRouteChoices(left, right, activeFilter));
+  }, [activeFilter, routeChoices]);
+
+  const selectedRoute = rankedRouteChoices[selectedAlternativeIndex] ?? null;
+  const selectedRouteTransferCount = selectedRoute ? getRouteTransferCount(selectedRoute) : 0;
+
   const expandedRoute =
-    expandedRouteIndex !== null ? routeChoices[expandedRouteIndex] ?? null : null;
+    expandedRouteIndex !== null ? rankedRouteChoices[expandedRouteIndex] ?? null : null;
 
   useEffect(() => {
     const detect = async () => {
@@ -568,7 +630,7 @@ export default function HomeScreen() {
     const summary = [
       `${t("route.share.title")}`,
       `${originLabel} -> ${destinationLabel}`,
-      `${Math.max(1, Math.round(selectedRoute.etaSeconds / 60))} ${t("route.min")} - ${formatTransferText(selectedRoute.transferCount)} - ${Math.round(selectedRoute.walkingDistanceM)}m ${t("route.walk")}`,
+      `${Math.max(1, Math.round(selectedRoute.etaSeconds / 60))} ${t("route.min")} - ${formatTransferText(selectedRouteTransferCount)} - ${Math.round(selectedRoute.walkingDistanceM)}m ${t("route.walk")}`,
       "",
       `${t("route.share.universalLinkLabel")}: ${universalLink}`,
       "",
@@ -863,6 +925,9 @@ export default function HomeScreen() {
   const applyRouteFilter = async (value: RouteFilterValue) => {
     const previousFilter = activeFilter;
     setActiveFilter(value);
+    setSelectedAlternativeIndex(0);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
 
     try {
       await setRoutingPreferencesMutation.mutateAsync({
@@ -870,11 +935,6 @@ export default function HomeScreen() {
       });
 
       await routingPreferencesQuery.refetch();
-
-      // Recompute immediately so selected filter changes route results without extra taps.
-      if (currentLocation && destination) {
-        await requestRoute(currentLocation, destination);
-      }
     } catch (err) {
       setActiveFilter(previousFilter);
       const message = extractApiErrorMessage(err);
@@ -1581,7 +1641,7 @@ export default function HomeScreen() {
                           <View>
                             <ThemedText style={styles.resultsPanelTitle}>{t("home.results.routeDetails")}</ThemedText>
                             <ThemedText style={styles.resultsPanelSubtitle}>
-                              {Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} {t("route.min")} • {formatTransferText(expandedRoute.transferCount)}
+                              {Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} {t("route.min")} • {formatTransferText(getRouteTransferCount(expandedRoute))}
                             </ThemedText>
                           </View>
                           <Feather name="chevron-down" size={18} color={Colors.dark.text} />
@@ -1593,7 +1653,7 @@ export default function HomeScreen() {
                             <ThemedText style={styles.expandedMetricLabel}>{t("route.eta")}</ThemedText>
                           </View>
                           <View style={styles.expandedMetricPill}>
-                            <ThemedText style={styles.expandedMetricValue}>{expandedRoute.transferCount}</ThemedText>
+                            <ThemedText style={styles.expandedMetricValue}>{getRouteTransferCount(expandedRoute)}</ThemedText>
                             <ThemedText style={styles.expandedMetricLabel}>{t("route.transfers")}</ThemedText>
                           </View>
                           <View style={styles.expandedMetricPill}>
@@ -1614,7 +1674,7 @@ export default function HomeScreen() {
                       </View>
                     ) : (
                       <View style={styles.resultsListBlock}>
-                        {routeChoices.map((choice, index) => {
+                        {rankedRouteChoices.map((choice, index) => {
                           const active = index === selectedAlternativeIndex;
                           const walkCount = choice.segments.filter((segment) => segment.mode === "walk").length;
                           const busNames = choice.segments
@@ -1655,7 +1715,7 @@ export default function HomeScreen() {
                               </View>
 
                               <ThemedText style={styles.routeWindowText}>
-                                {formatTransferText(choice.transferCount)} • {Math.round(choice.walkingDistanceM)} m {t("route.walk")}
+                                {formatTransferText(getRouteTransferCount(choice))} • {Math.round(choice.walkingDistanceM)} m {t("route.walk")}
                               </ThemedText>
                               <ThemedText style={styles.routeSubtitleText}>
                                 {choice.bestEffort ? t("home.results.liveFallback") : t("home.results.live")}

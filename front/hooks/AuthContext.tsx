@@ -1,6 +1,8 @@
 import React, {
   createContext,
   useContext,
+  useCallback,
+  useRef,
   useState,
   useEffect,
   ReactNode,
@@ -57,6 +59,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const tokenRef = useRef<string | null>(null);
+
+  const clearAuthState = useCallback(async () => {
+    setToken(null);
+    tokenRef.current = null;
+    setUser(null);
+
+    await SecureStore.deleteItemAsync("auth_token");
+    await SecureStore.deleteItemAsync("auth_user");
+    delete api.defaults.headers.common["Authorization"];
+  }, []);
 
   useEffect(() => {
     // Check for stored token on app launch
@@ -67,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (storedToken && storedUser) {
           setToken(storedToken);
+          tokenRef.current = storedToken;
           setUser(JSON.parse(storedUser));
           // Set default header for future requests
           api.defaults.headers.common["Authorization"] =
@@ -90,9 +104,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadAuthData();
   }, []);
 
+  useEffect(() => {
+    const interceptorId = api.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const requestAuthHeader =
+          error?.config?.headers?.Authorization ??
+          error?.config?.headers?.authorization;
+        const currentToken = tokenRef.current;
+        const hasCurrentBearerToken =
+          typeof requestAuthHeader === "string" &&
+          typeof currentToken === "string" &&
+          requestAuthHeader === `Bearer ${currentToken}`;
+
+        if (error?.response?.status === 401 && hasCurrentBearerToken) {
+          await clearAuthState();
+          router.replace("/login");
+        }
+
+        return Promise.reject(error);
+      },
+    );
+
+    return () => {
+      api.interceptors.response.eject(interceptorId);
+    };
+  }, [clearAuthState, router, token]);
+
   const signIn = async (newToken: string, newUser: User) => {
     try {
       setToken(newToken);
+      tokenRef.current = newToken;
       setUser(newUser);
 
       // Persist data
@@ -118,15 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      setToken(null);
-      setUser(null);
-
-      // Clear storage
-      await SecureStore.deleteItemAsync("auth_token");
-      await SecureStore.deleteItemAsync("auth_user");
-
-      // Clear axios header
-      delete api.defaults.headers.common["Authorization"];
+      await clearAuthState();
 
       router.replace("/login");
     } catch (error) {

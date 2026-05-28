@@ -104,7 +104,7 @@ export async function buildApp() {
   });
 
   app.register(authRoutes, { prefix: "/api/auth" });
-  app.register(busRoutes, { prefix: "/api/buses" });
+  app.register(busRoutes, { prefix: "/api/busses" });
   app.get(
     "/api/protected",
     {
