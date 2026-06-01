@@ -224,6 +224,7 @@ export default function HomeScreen() {
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
     null,
   );
+  const [liveLocation, setLiveLocation] = useState<LocationDTO | null>(null);
   const [destination, setDestination] = useState<LocationDTO | null>(null);
   const [routeResult, setRouteResult] = useState<NavigationRouteResult | null>(
     null,
@@ -245,6 +246,8 @@ export default function HomeScreen() {
     height: number;
   } | null>(null);
   const originPanelAnim = useRef(new Animated.Value(0)).current;
+  const liveLocationPulseScale = useRef(new Animated.Value(1)).current;
+  const liveLocationPulseOpacity = useRef(new Animated.Value(0.55)).current;
   const [originSearchText, setOriginSearchText] = useState(t("map.startFallback"));
   const [mapCenterPoint, setMapCenterPoint] = useState<LocationDTO | null>(null);
   const [favoriteOrigins, setFavoriteOrigins] = useState<FavoriteOrigin[]>([]);
@@ -297,6 +300,33 @@ export default function HomeScreen() {
     expandedRouteIndex !== null ? rankedRouteChoices[expandedRouteIndex] ?? null : null;
 
   useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.parallel([
+        Animated.timing(liveLocationPulseScale, {
+          toValue: 2.4,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(liveLocationPulseOpacity, {
+          toValue: 0,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+      ]),
+      { resetBeforeIteration: true },
+    );
+
+    pulse.start();
+
+    return () => {
+      pulse.stop();
+    };
+  }, [liveLocationPulseOpacity, liveLocationPulseScale]);
+
+  useEffect(() => {
+    let subscription: { remove: () => void } | null = null;
+    let isActive = true;
+
     const detect = async () => {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted") {
@@ -314,6 +344,12 @@ export default function HomeScreen() {
         label: t("map.startFallback"),
       };
 
+      if (!isActive) {
+        return;
+      }
+
+      setError(null);
+      setLiveLocation(point);
       setCurrentLocation(point);
       setOriginSearchText(point.label ?? t("map.startFallback"));
       setMapCenterPoint(point);
@@ -326,10 +362,41 @@ export default function HomeScreen() {
         },
         350,
       );
+
+      const nextSubscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 3000,
+          distanceInterval: 5,
+        },
+        (location) => {
+          if (!isActive) {
+            return;
+          }
+
+          setLiveLocation({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+            label: t("map.startFallback"),
+          });
+        },
+      );
+
+      if (!isActive) {
+        nextSubscription.remove();
+        return;
+      }
+
+      subscription = nextSubscription;
     };
 
     void detect();
-  }, []);
+
+    return () => {
+      isActive = false;
+      subscription?.remove();
+    };
+  }, [t]);
 
   useEffect(() => {
     const loadFavorites = async () => {
@@ -729,6 +796,19 @@ export default function HomeScreen() {
   const recenterToCurrentLocation = async () => {
     hapticSelection();
 
+    if (liveLocation) {
+      mapRef.current?.animateToRegion(
+        {
+          latitude: liveLocation.lat,
+          longitude: liveLocation.lng,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        },
+        350,
+      );
+      return;
+    }
+
     if (!currentLocation) {
       try {
         const permission = await Location.requestForegroundPermissionsAsync();
@@ -750,6 +830,7 @@ export default function HomeScreen() {
           label: t("map.startFallback"),
         };
 
+        setLiveLocation(point);
         setCurrentLocation(point);
         mapRef.current?.animateToRegion(
           {
@@ -1024,10 +1105,12 @@ export default function HomeScreen() {
   };
 
   const useCurrentLocationAsOrigin = () => {
-    if (!currentLocation) {
+    if (!liveLocation) {
       return;
     }
 
+    setCurrentLocation(liveLocation);
+    setOriginSearchText(liveLocation.label ?? t("map.startFallback"));
     closeOriginSelectionPanel();
     hapticSelection();
     setSelectionPhase("ready");
@@ -1057,7 +1140,7 @@ export default function HomeScreen() {
     hapticSuccess();
   };
 
-  const useFavoriteAsOrigin = (favorite: FavoriteOrigin) => {
+  const applyFavoriteAsOrigin = (favorite: FavoriteOrigin) => {
     const point: LocationDTO = {
       lat: favorite.lat,
       lng: favorite.lng,
@@ -1132,7 +1215,6 @@ export default function HomeScreen() {
           style={StyleSheet.absoluteFillObject}
           initialRegion={INITIAL_REGION}
           mapType={mapType}
-          showsUserLocation
           mapPadding={{ top: topMapControlInset, right: 0, bottom: 0, left: 0 }}
           onRegionChangeComplete={(region) => {
             setMapCenterPoint({
@@ -1168,7 +1250,39 @@ export default function HomeScreen() {
             setRouteResult(null);
           }}
         >
-          {currentLocation && !routeResult ? (
+          {liveLocation ? (
+            <Marker
+              coordinate={{
+                latitude: liveLocation.lat,
+                longitude: liveLocation.lng,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges
+              title={t("map.startFallback")}
+              description={liveLocation.label}
+            >
+              <View style={styles.liveLocationMarker}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.liveLocationPulse,
+                    {
+                      opacity: liveLocationPulseOpacity,
+                      transform: [{ scale: liveLocationPulseScale }],
+                    },
+                  ]}
+                />
+                <View style={styles.liveLocationHalo}>
+                  <View style={styles.liveLocationCore} />
+                </View>
+              </View>
+            </Marker>
+          ) : null}
+
+          {currentLocation &&
+          (!liveLocation ||
+            Math.abs(currentLocation.lat - liveLocation.lat) > 0.000001 ||
+            Math.abs(currentLocation.lng - liveLocation.lng) > 0.000001) ? (
             <Marker
               coordinate={{
                 latitude: currentLocation.lat,
@@ -1524,7 +1638,7 @@ export default function HomeScreen() {
                     <TouchableOpacity
                       key={favorite.id}
                       style={styles.originFavoriteRow}
-                      onPress={() => useFavoriteAsOrigin(favorite)}
+                      onPress={() => applyFavoriteAsOrigin(favorite)}
                       activeOpacity={0.85}
                     >
                       <Ionicons name="heart" size={14} color={Colors.dark.primary} />
@@ -1841,6 +1955,40 @@ const styles = StyleSheet.create({
     backgroundColor: TransitTheme.route.node,
     borderWidth: 1,
     borderColor: TransitTheme.route.nodeBorder,
+  },
+  liveLocationMarker: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveLocationPulse: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(96, 165, 250, 0.32)",
+  },
+  liveLocationHalo: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
+    borderWidth: 2,
+    borderColor: "#60A5FA",
+    shadowColor: "#60A5FA",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  liveLocationCore: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563EB",
   },
   segmentNodeDotWalk: {
     width: 6,
