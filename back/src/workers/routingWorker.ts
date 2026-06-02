@@ -34,17 +34,19 @@ import type {
   RoutingWorkerResponse,
   StepEdge,
 } from "./routingWorkerTypes.js";
+import { enrichBusSegmentGeometryWithApi } from "./busRoutingApi.js";
+import { enrichWalkingStepWithApi } from "./walkingRoutingApi.js";
 
 const START_NODE_ID = -1;
 const END_NODE_ID = -2;
 const EPSILON = 1e-9;
 
-function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult {
+async function runWeightedAStar(payload: RoutingWorkerPayload): Promise<NavigationRouteResult> {
   const { graph, from, to, routeMetrics, config } = payload;
-  const walkingMode = payload.walkingMode ?? "dynamic";
+  const walkingMode = payload.walkingMode ?? "api";
   const maxExpandedStates = Math.max(
-    20_000,
-    Number(process.env.ROUTING_MAX_EXPANDED_STATES ?? 80_000),
+    80_000,
+    Number(process.env.ROUTING_MAX_EXPANDED_STATES ?? 220_000),
   );
   const allowStartAnchorOverCap = payload.relaxation?.allowStartAnchorOverCap === true;
   const allowEndAnchorOverCap = payload.relaxation?.allowEndAnchorOverCap === true;
@@ -79,6 +81,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       etaSeconds: 0,
       segments: [],
       bestEffort: false,
+      walkingMode,
       usedConfig: config,
     };
   }
@@ -199,7 +202,7 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
       if (currentNode) {
         const currentLocation = nodeToLocation(currentNode);
 
-        if (walkingMode === "dynamic") {
+        if (walkingMode === "api" || walkingMode === "dynamic") {
           const walkNeighbors = findNearbyNodeIds(
             currentLocation,
             config.maxWalkingDistanceM,
@@ -366,20 +369,40 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     availability: 0,
   };
 
-  const components = steps.reduce((acc, step) => mergeComponents(acc, step.components), zero);
-  const totalCost = steps.reduce((sum, step) => sum + step.cost, 0);
-  const transferCount = steps.reduce((sum, step) => sum + step.transferIncrement, 0);
-  const walkingDistanceM = steps
-    .filter((step) => step.mode === "walk")
-    .reduce((sum, step) => sum + step.distanceM, 0);
-  const etaSeconds = steps.reduce((sum, step) => sum + step.timeSeconds, 0);
-
   if (requireBusSegment && !steps.some((step) => step.mode === "bus")) {
     throw new Error("No transit-first route found under current constraints");
   }
 
-  const segments: RouteSegment[] = [];
+  const enrichedSteps: StepEdge[] = [];
   for (const step of steps) {
+    const fromLocation = step.fromNodeId === START_NODE_ID
+      ? from
+      : step.fromNodeId === END_NODE_ID
+        ? to
+        : nodeToLocation(indexes.nodeById.get(step.fromNodeId) as RoutingGraphNode);
+    const toLocation = step.toNodeId === START_NODE_ID
+      ? from
+      : step.toNodeId === END_NODE_ID
+        ? to
+        : nodeToLocation(indexes.nodeById.get(step.toNodeId) as RoutingGraphNode);
+
+    enrichedSteps.push(
+      walkingMode === "api"
+        ? await enrichWalkingStepWithApi(step, fromLocation, toLocation, config)
+        : step,
+    );
+  }
+
+  const components = enrichedSteps.reduce((acc, step) => mergeComponents(acc, step.components), zero);
+  const totalCost = enrichedSteps.reduce((sum, step) => sum + step.cost, 0);
+  const transferCount = enrichedSteps.reduce((sum, step) => sum + step.transferIncrement, 0);
+  const walkingDistanceM = enrichedSteps
+    .filter((step) => step.mode === "walk")
+    .reduce((sum, step) => sum + step.distanceM, 0);
+  const etaSeconds = enrichedSteps.reduce((sum, step) => sum + step.timeSeconds, 0);
+
+  const segments: RouteSegment[] = [];
+  for (const step of enrichedSteps) {
     const fromLocation = step.fromNodeId === START_NODE_ID
       ? from
       : step.fromNodeId === END_NODE_ID
@@ -406,6 +429,10 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     segments.push(formatSegment(step, fromLocation, toLocation, stepCoordinates, indexes.routeNameById));
   }
 
+  const roadSnappedSegments = await Promise.all(
+    segments.map((segment) => enrichBusSegmentGeometryWithApi(segment)),
+  );
+
   return {
     message: "Weighted A* route computed in worker",
     executedInWorker: true,
@@ -418,8 +445,9 @@ function runWeightedAStar(payload: RoutingWorkerPayload): NavigationRouteResult 
     transferCount,
     walkingDistanceM,
     etaSeconds,
-    segments,
+    segments: roadSnappedSegments,
     bestEffort: false,
+    walkingMode,
     usedConfig: config,
   };
 }
@@ -430,9 +458,9 @@ if (!parentPort) {
 
 const port = parentPort;
 
-port.on("message", (message: RoutingWorkerRequest) => {
+port.on("message", async (message: RoutingWorkerRequest) => {
   try {
-    const response: RoutingWorkerResponse = { id: message.id, result: runWeightedAStar(message.payload) };
+    const response: RoutingWorkerResponse = { id: message.id, result: await runWeightedAStar(message.payload) };
 
     port.postMessage(response);
   } catch (error) {

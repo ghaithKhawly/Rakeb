@@ -13,7 +13,6 @@ import type {
   RouteLiveMetricForRouting,
 } from "../../../../types/navigation";
 import { getEffectiveRoutingConfig } from "./busHandlers";
-import { saveTravelHistory } from "./travelHistoryHandlers";
 import { routeWithFallback } from "./routingHandlers";
 import {
   applyProfileConfig,
@@ -24,6 +23,7 @@ import {
 } from "../utils/busUtils";
 
 type RouteProfile = ReturnType<typeof buildAlternativeProfiles>[number];
+type WalkingMode = "api" | "dynamic" | "precomputed";
 
 function scoreProfileCandidate(profileId: string, route: NavigationRouteResult): number {
   const transferCount = Number(route.transferCount ?? 0);
@@ -76,7 +76,7 @@ async function computeNavigationAlternatives(
   const altProfiles = profiles.slice(1);
   for (const profile of altProfiles) {
     const profileConfig = applyProfileConfig(config, profile);
-    const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+    const candidateWalkingModes: WalkingMode[] = ["api"];
     let bestCandidate: NavigationRouteResult | null = null;
     let bestCandidateScore = Number.POSITIVE_INFINITY;
 
@@ -169,7 +169,7 @@ async function computeNavigationAlternatives(
             graph: snapshot,
             routeMetrics,
             config: exploratory.config,
-            walkingMode: "dynamic",
+            walkingMode: "api",
           },
           { timeoutMs: Math.max(2500, Math.floor(workerTimeoutMs * 0.5)) },
         );
@@ -282,6 +282,7 @@ export async function navigationRouteHandler(
       cachedResult
       && cached.graph_version === snapshot.graphVersion
       && JSON.stringify(cachedResult.usedConfig) === configJson
+      && cachedResult.walkingMode === "api"
     ) {
       return normalizeRouteResultForSchema(cachedResult, body.from, body.to);
     }
@@ -307,43 +308,18 @@ export async function navigationRouteHandler(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isTimeout = /timed out/i.test(message);
+      const isSearchBudget = /search budget exceeded/i.test(message);
       const isNoRoute = /No route found|search budget exceeded/i.test(message);
-      return reply.code(isTimeout ? 504 : 500).send({
+      return reply.code(isTimeout ? 504 : isNoRoute ? 422 : 500).send({
         error: isTimeout
           ? "Routing timed out while searching for a path"
+          : isSearchBudget
+            ? "Route search needs more room. Try More options in preferences, fewer transfer limits, or closer start and destination points."
           : isNoRoute
             ? "No feasible route found under current constraints"
             : "Routing failed while searching for a path",
-        details: message,
+        details: process.env.NODE_ENV === "production" ? undefined : message,
       });
-    }
-
-    const now = new Date();
-    const routeIds = Array.from(
-      new Set(
-        routeResult.segments
-          .filter((segment) => segment.mode === "bus" && typeof segment.routeId === "number")
-          .map((segment) => segment.routeId as number),
-      ),
-    );
-    const totalDistanceM = routeResult.segments.reduce((sum, segment) => sum + segment.distanceM, 0);
-
-    try {
-      await saveTravelHistory(client, {
-        userId,
-        from: body.from,
-        to: body.to,
-        routeIds,
-        transferCount: routeResult.transferCount,
-        bestEffort: routeResult.bestEffort,
-        totalDistanceM,
-        etaSeconds: routeResult.etaSeconds,
-        graphVersion: String(routeResult.graphVersion ?? snapshot.graphVersion ?? "unknown"),
-        pathfindingResult: routeResult as NavigationRouteResult,
-        traveledAt: now,
-      });
-    } catch (historyError) {
-      fastify.log.warn({ error: historyError }, "Failed to persist navigation history entry");
     }
 
     return routeResult;
@@ -383,7 +359,7 @@ async function computeQuickRouteAlternatives(
   const altProfiles = profiles.slice(1);
   for (const profile of altProfiles) {
     const profileConfig = applyProfileConfig(config, profile);
-    const candidateWalkingModes: Array<"dynamic" | "precomputed"> = ["dynamic", "precomputed"];
+    const candidateWalkingModes: WalkingMode[] = ["api"];
     let bestCandidate: NavigationRouteResult | null = null;
     let bestCandidateScore = Number.POSITIVE_INFINITY;
 
@@ -476,7 +452,7 @@ async function computeQuickRouteAlternatives(
             graph: snapshot,
             routeMetrics,
             config: exploratory.config,
-            walkingMode: "dynamic",
+            walkingMode: "api",
           },
           { timeoutMs: Math.max(2500, Math.floor(workerTimeoutMs * 0.5)) },
         );
@@ -652,14 +628,17 @@ export async function quickNavigationRouteHandler(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isTimeout = /timed out/i.test(message);
+      const isSearchBudget = /search budget exceeded/i.test(message);
       const isNoRoute = /No route found|search budget exceeded/i.test(message);
-      return reply.code(isTimeout ? 504 : 500).send({
+      return reply.code(isTimeout ? 504 : isNoRoute ? 422 : 500).send({
         error: isTimeout
           ? "Routing timed out while searching for a path"
+          : isSearchBudget
+            ? "Route search needs more room. Try More options in preferences, fewer transfer limits, or closer start and destination points."
           : isNoRoute
             ? "No feasible route found under current constraints"
             : "Routing failed while searching for a path",
-        details: message,
+        details: process.env.NODE_ENV === "production" ? undefined : message,
       });
     }
   } finally {

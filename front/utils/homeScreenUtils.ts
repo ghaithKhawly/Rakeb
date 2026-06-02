@@ -199,7 +199,19 @@ export function extractApiErrorMessage(error: unknown): string {
     }
 
     if (data && typeof data === "object") {
-      if (typeof data.details === "string" && data.details.trim().length > 0) {
+      if (typeof data.error === "string" && data.error.trim().length > 0) {
+        return data.error;
+      }
+
+      if (typeof data.message === "string" && data.message.trim().length > 0) {
+        return data.message;
+      }
+
+      if (
+        typeof data.details === "string" &&
+        data.details.trim().length > 0 &&
+        !/diagnostics=|expandedStates|Routing search budget exceeded/i.test(data.details)
+      ) {
         return data.details;
       }
 
@@ -229,13 +241,6 @@ export function extractApiErrorMessage(error: unknown): string {
         return details.join("\n");
       }
 
-      if (typeof data.error === "string" && data.error.trim().length > 0) {
-        return data.error;
-      }
-
-      if (typeof data.message === "string" && data.message.trim().length > 0) {
-        return data.message;
-      }
     }
 
     if (error.message) {

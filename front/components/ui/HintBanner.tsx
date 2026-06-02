@@ -38,10 +38,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   wrapCompact: {
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 8,
+    borderRadius: 11,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    gap: 7,
   },
   iconWrap: {
     width: 22,
@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   messageCompact: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 13,
   },
 });

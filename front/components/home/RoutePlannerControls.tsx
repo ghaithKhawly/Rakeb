@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import {
   Animated,
   Easing,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -68,7 +69,7 @@ export function RoutePlannerControls({
       toValue: isCollapsed ? 0 : 1,
       duration: 220,
       easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start();
   }, [isCollapsed, panelAnimation]);
 
@@ -78,13 +79,7 @@ export function RoutePlannerControls({
       {
         translateY: panelAnimation.interpolate({
           inputRange: [0, 1],
-          outputRange: [10, 0],
-        }),
-      },
-      {
-        scale: panelAnimation.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.985, 1],
+          outputRange: [4, 0],
         }),
       },
     ],
@@ -93,7 +88,12 @@ export function RoutePlannerControls({
   return (
     <>
       <View style={styles.sheetHeaderRow}>
-        <ThemedText type="defaultSemiBold" style={styles.title}>{t("planner.actions")}</ThemedText>
+        <View style={styles.titleCluster}>
+          <View style={styles.titleIcon}>
+            <Ionicons name="navigate-outline" size={15} color={Colors.dark.primary} />
+          </View>
+          <ThemedText type="defaultSemiBold" style={styles.title}>{t("planner.actions")}</ThemedText>
+        </View>
         <View style={styles.sheetHeaderActions}>
           <TouchableOpacity
             style={styles.preferencesButton}
@@ -121,9 +121,15 @@ export function RoutePlannerControls({
         </View>
       </View>
 
-      {!isCollapsed ? (
-        <Animated.View style={[styles.panelBody, panelMotionStyle]}>
-          <View style={styles.filterWrap}>
+      <Animated.View
+        pointerEvents={isCollapsed ? "none" : "auto"}
+        style={[styles.panelBody, panelMotionStyle]}
+      >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterWrap}
+          >
             {FILTER_CHIPS.map((chip) => {
               const selected = activeFilter === chip.key;
               return (
@@ -147,7 +153,7 @@ export function RoutePlannerControls({
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
 
           {showActionButtons ? (
             <View style={styles.buttonRow}>
@@ -186,8 +192,7 @@ export function RoutePlannerControls({
           {errorMessage ? (
             <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
           ) : null}
-        </Animated.View>
-      ) : null}
+      </Animated.View>
     </>
   );
 }
@@ -196,11 +201,34 @@ const styles = StyleSheet.create({
   title: {
     color: TransitTheme.panel.title,
     fontSize: 15,
+    fontWeight: "900",
   },
   sheetHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    minHeight: 40,
+    borderRadius: 12,
+    backgroundColor: TransitTheme.panel.cardBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  titleCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+    flex: 1,
+  },
+  titleIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.cardBgActive,
   },
   sheetHeaderActions: {
     flexDirection: "row",
@@ -214,9 +242,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    backgroundColor: TransitTheme.panel.cardBg,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
   },
   preferencesButtonText: {
     color: TransitTheme.panel.title,
@@ -224,9 +252,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   sheetToggleButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     alignItems: "center",
@@ -240,16 +268,16 @@ const styles = StyleSheet.create({
   },
   filterWrap: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
+    paddingRight: 4,
   },
   filterChip: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
   filterChipSelected: {
     borderColor: Kinetic.primary,
@@ -257,7 +285,7 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     color: TransitTheme.panel.caption,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
   },
   filterChipTextSelected: {
@@ -265,14 +293,16 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
   },
   primaryButtonText: {
     fontSize: 14,
   },
   clearButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
@@ -290,7 +320,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   panelBody: {
-    gap: 8,
-    marginTop: 8,
+    gap: 7,
+    marginTop: 7,
   },
 });

@@ -22,6 +22,7 @@ import {
   increaseBusPricesByTenPercent,
   invalidateGraphCache,
   resolveTrip,
+  saveUserTravelHistory,
   setRoutingPreferences,
   submitBusFeedback,
 } from "@/services/busApi";
@@ -125,12 +126,8 @@ export function useBusFeedbackSummary(routeId?: number, days = 30) {
 }
 
 export function useComputeNavigationRouteMutation() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: NavigationRouteRequestBody) => computeNavigationRoute(body),
-    onSuccess: async () => {
-      await invalidate(queryClient, [...busApiKeys.all, "travelHistory"]);
-    },
   });
 }
 
@@ -228,6 +225,16 @@ export function useSetRoutingPreferencesMutation() {
     mutationFn: (body: SetRoutingPreferencesBody) => setRoutingPreferences(body),
     onSuccess: async () => {
       await invalidate(queryClient, busApiKeys.routingPreferences());
+    },
+  });
+}
+
+export function useSaveUserTravelHistoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: saveUserTravelHistory,
+    onSuccess: async () => {
+      await invalidate(queryClient, [...busApiKeys.all, "travelHistory"]);
     },
   });
 }

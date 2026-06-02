@@ -16,11 +16,16 @@ import {
   getBusSchema,
   getBussesSchema,
   invalidateGraphSchema,
+  saveUserTravelHistorySchema,
   setRoutingPreferencesSchema,
   submitBusFeedbackSchema,
 } from "../schemas/bus";
 import { checkInDriverHandler, checkOutDriverHandler, getDriverAvailabilityHandler } from "./handlers/driverHandlers";
-import { listUserTravelHistoryHandler, deleteUserTravelHistoryHandler } from "./handlers/travelHistoryHandlers";
+import {
+  listUserTravelHistoryHandler,
+  deleteUserTravelHistoryHandler,
+  saveUserTravelHistoryHandler,
+} from "./handlers/travelHistoryHandlers";
 import {
   listBussesHandler,
   getBusHandler,
@@ -125,6 +130,15 @@ export async function busRoutes(fastify: FastifyInstance) {
       schema: getUserTravelHistorySchema,
     },
     async (request, reply) => listUserTravelHistoryHandler(fastify, request, reply),
+  );
+
+  fastify.post(
+    "/navigation/history",
+    {
+      preHandler: [fastify.authenticate],
+      schema: saveUserTravelHistorySchema,
+    },
+    async (request, reply) => saveUserTravelHistoryHandler(fastify, request, reply),
   );
 
   fastify.delete(

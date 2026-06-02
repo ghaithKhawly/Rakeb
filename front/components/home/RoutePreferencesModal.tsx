@@ -21,6 +21,7 @@ import { hapticLight, hapticSelection, hapticSuccess } from "@/utils/haptics";
 type WalkingComfort = "low" | "medium" | "high";
 type TransferSetting = "none" | "one" | "two" | "flexible";
 type WalkingPace = "slow" | "normal" | "fast";
+type SearchBreadth = "compact" | "balanced" | "wide";
 
 const WALKING_COMFORT_OPTIONS: Record<
   WalkingComfort,
@@ -44,6 +45,12 @@ const WALKING_PACE_OPTIONS: Record<WalkingPace, number> = {
   fast: 1.5,
 };
 
+const SEARCH_BREADTH_OPTIONS: Record<SearchBreadth, number> = {
+  compact: 8,
+  balanced: 12,
+  wide: 18,
+};
+
 function deriveWalkingComfort(maxWalkingDistanceM: number): WalkingComfort {
   if (maxWalkingDistanceM <= 450) return "low";
   if (maxWalkingDistanceM <= 1100) return "medium";
@@ -61,6 +68,12 @@ function deriveWalkingPace(walkingSpeedMps: number): WalkingPace {
   if (walkingSpeedMps <= 1.1) return "slow";
   if (walkingSpeedMps >= 1.4) return "fast";
   return "normal";
+}
+
+function deriveSearchBreadth(maxWalkingNeighbors: number): SearchBreadth {
+  if (maxWalkingNeighbors <= 9) return "compact";
+  if (maxWalkingNeighbors >= 15) return "wide";
+  return "balanced";
 }
 
 type OptionChipProps = {
@@ -108,7 +121,7 @@ export function RoutePreferencesModal({
   const [walkingComfort, setWalkingComfort] = useState<WalkingComfort>("medium");
   const [transferSetting, setTransferSetting] = useState<TransferSetting>("flexible");
   const [walkingPace, setWalkingPace] = useState<WalkingPace>("normal");
-  const [maxWalkingNeighbors, setMaxWalkingNeighbors] = useState(12);
+  const [searchBreadth, setSearchBreadth] = useState<SearchBreadth>("balanced");
 
   useEffect(() => {
     if (!visible) {
@@ -124,7 +137,7 @@ export function RoutePreferencesModal({
     setWalkingComfort(deriveWalkingComfort(data.options.maxWalkingDistanceM));
     setTransferSetting(deriveTransferSetting(data.options.maxBusTransfers));
     setWalkingPace(deriveWalkingPace(data.options.walkingSpeedMps));
-    setMaxWalkingNeighbors(data.options.maxWalkingNeighbors);
+    setSearchBreadth(deriveSearchBreadth(data.options.maxWalkingNeighbors));
   }, [visible, routingPreferencesQuery.data]);
 
   const payload = useMemo(() => {
@@ -135,12 +148,12 @@ export function RoutePreferencesModal({
       options: {
         maxWalkingDistanceM: selectedWalking.maxWalkingDistanceM,
         maxTotalWalkingDistanceM: selectedWalking.maxTotalWalkingDistanceM,
-        maxWalkingNeighbors,
+        maxWalkingNeighbors: SEARCH_BREADTH_OPTIONS[searchBreadth],
         maxBusTransfers: TRANSFER_OPTIONS[transferSetting],
         walkingSpeedMps: WALKING_PACE_OPTIONS[walkingPace],
       },
     };
-  }, [maxWalkingNeighbors, preferenceWeights, transferSetting, walkingComfort, walkingPace]);
+  }, [preferenceWeights, searchBreadth, transferSetting, walkingComfort, walkingPace]);
 
   const savePreferences = async () => {
     hapticLight();
@@ -183,7 +196,10 @@ export function RoutePreferencesModal({
           ) : (
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
               <View style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>{t("prefModal.walkingTolerance")}</ThemedText>
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>{t("prefModal.walkingTolerance")}</ThemedText>
+                  <ThemedText style={styles.sectionDescription}>{t("prefModal.walkingDescription")}</ThemedText>
+                </View>
                 <View style={styles.optionWrap}>
                   <OptionChip label={t("prefModal.walking.low")} selected={walkingComfort === "low"} onPress={() => { hapticSelection(); setWalkingComfort("low"); }} />
                   <OptionChip label={t("prefModal.walking.medium")} selected={walkingComfort === "medium"} onPress={() => { hapticSelection(); setWalkingComfort("medium"); }} />
@@ -192,7 +208,10 @@ export function RoutePreferencesModal({
               </View>
 
               <View style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>{t("prefModal.transferLimit")}</ThemedText>
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>{t("prefModal.transferLimit")}</ThemedText>
+                  <ThemedText style={styles.sectionDescription}>{t("prefModal.transferDescription")}</ThemedText>
+                </View>
                 <View style={styles.optionWrap}>
                   <OptionChip label={t("prefModal.transfer.none")} selected={transferSetting === "none"} onPress={() => { hapticSelection(); setTransferSetting("none"); }} />
                   <OptionChip label={t("prefModal.transfer.one")} selected={transferSetting === "one"} onPress={() => { hapticSelection(); setTransferSetting("one"); }} />
@@ -202,7 +221,10 @@ export function RoutePreferencesModal({
               </View>
 
               <View style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>{t("prefModal.walkingPace")}</ThemedText>
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>{t("prefModal.walkingPace")}</ThemedText>
+                  <ThemedText style={styles.sectionDescription}>{t("prefModal.paceDescription")}</ThemedText>
+                </View>
                 <View style={styles.optionWrap}>
                   <OptionChip label={t("prefModal.pace.slow")} selected={walkingPace === "slow"} onPress={() => { hapticSelection(); setWalkingPace("slow"); }} />
                   <OptionChip label={t("prefModal.pace.normal")} selected={walkingPace === "normal"} onPress={() => { hapticSelection(); setWalkingPace("normal"); }} />
@@ -211,11 +233,14 @@ export function RoutePreferencesModal({
               </View>
 
               <View style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>{t("prefModal.searchBreadth")}</ThemedText>
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>{t("prefModal.searchBreadth")}</ThemedText>
+                  <ThemedText style={styles.sectionDescription}>{t("prefModal.breadthDescription")}</ThemedText>
+                </View>
                 <View style={styles.optionWrap}>
-                  <OptionChip label={t("prefModal.breadth.compact")} selected={maxWalkingNeighbors === 8} onPress={() => { hapticSelection(); setMaxWalkingNeighbors(8); }} />
-                  <OptionChip label={t("prefModal.breadth.balanced")} selected={maxWalkingNeighbors === 12} onPress={() => { hapticSelection(); setMaxWalkingNeighbors(12); }} />
-                  <OptionChip label={t("prefModal.breadth.wide")} selected={maxWalkingNeighbors === 18} onPress={() => { hapticSelection(); setMaxWalkingNeighbors(18); }} />
+                  <OptionChip label={t("prefModal.breadth.compact")} selected={searchBreadth === "compact"} onPress={() => { hapticSelection(); setSearchBreadth("compact"); }} />
+                  <OptionChip label={t("prefModal.breadth.balanced")} selected={searchBreadth === "balanced"} onPress={() => { hapticSelection(); setSearchBreadth("balanced"); }} />
+                  <OptionChip label={t("prefModal.breadth.wide")} selected={searchBreadth === "wide"} onPress={() => { hapticSelection(); setSearchBreadth("wide"); }} />
                 </View>
               </View>
             </ScrollView>
@@ -259,18 +284,18 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(2, 6, 23, 0.56)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
   card: {
     width: "100%",
     maxWidth: 560,
-    maxHeight: "86%",
+    maxHeight: "82%",
     borderRadius: 18,
     backgroundColor: TransitTheme.panel.bg,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
-    padding: 14,
-    gap: 12,
+    padding: 12,
+    gap: 10,
   },
   headerRow: {
     flexDirection: "row",
@@ -308,29 +333,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   content: {
-    gap: 12,
+    gap: 9,
     paddingBottom: 2,
   },
   section: {
-    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 9,
+    gap: 7,
+  },
+  sectionHeader: {
+    gap: 1,
   },
   sectionTitle: {
     color: TransitTheme.panel.title,
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  sectionDescription: {
+    color: TransitTheme.panel.caption,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "600",
   },
   optionWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   optionChip: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
-    backgroundColor: TransitTheme.panel.cardBg,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   optionChipSelected: {
     borderColor: Kinetic.primary,
@@ -338,8 +377,8 @@ const styles = StyleSheet.create({
   },
   optionChipText: {
     color: TransitTheme.panel.caption,
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 11,
+    fontWeight: "700",
   },
   optionChipTextSelected: {
     color: TransitTheme.panel.title,

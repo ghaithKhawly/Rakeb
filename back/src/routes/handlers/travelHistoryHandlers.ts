@@ -2,7 +2,9 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
   DeleteUserTravelHistoryQuery,
   GetUserTravelHistoryQuery,
+  SaveUserTravelHistoryBody,
 } from "../../../../types/bus";
+import type { NavigationRouteResult, RouteSegment } from "../../../../types/navigation";
 
 type TravelHistoryRow = {
   id: number;
@@ -21,6 +23,54 @@ type TravelHistoryRow = {
   traveled_at: string | null;
   pathfinding_result: unknown;
 };
+
+function isRouteSegment(value: unknown): value is RouteSegment {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const segment = value as Partial<RouteSegment>;
+  return (
+    (segment.mode === "walk" || segment.mode === "bus")
+    && typeof segment.distanceM === "number"
+    && typeof segment.timeSeconds === "number"
+  );
+}
+
+function isNavigationRouteResult(value: unknown): value is NavigationRouteResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const route = value as Partial<NavigationRouteResult>;
+  return (
+    !!route.from
+    && typeof route.from.lat === "number"
+    && typeof route.from.lng === "number"
+    && !!route.to
+    && typeof route.to.lat === "number"
+    && typeof route.to.lng === "number"
+    && typeof route.transferCount === "number"
+    && typeof route.etaSeconds === "number"
+    && typeof route.bestEffort === "boolean"
+    && Array.isArray(route.segments)
+    && route.segments.every(isRouteSegment)
+  );
+}
+
+function getRouteIds(routeResult: NavigationRouteResult) {
+  return Array.from(
+    new Set(
+      routeResult.segments
+        .filter((segment) => segment.mode === "bus" && typeof segment.routeId === "number")
+        .map((segment) => segment.routeId as number),
+    ),
+  );
+}
+
+function getTotalDistanceM(routeResult: NavigationRouteResult) {
+  return routeResult.segments.reduce((sum, segment) => sum + segment.distanceM, 0);
+}
 
 export async function saveTravelHistory(
   client: Awaited<ReturnType<FastifyInstance["pg"]["connect"]>>,
@@ -108,7 +158,7 @@ export async function listUserTravelHistoryHandler(
   const client = await fastify.pg.connect();
   try {
     const countRes = await client.query<{ total: number }>(
-      "SELECT COUNT(*)::int AS total FROM travel_history WHERE user_id = $1",
+      "SELECT COUNT(*)::int AS total FROM travel_history WHERE user_id = $1 AND pathfinding_result ? 'tripFinishedAt'",
       [userId],
     );
 
@@ -132,6 +182,7 @@ export async function listUserTravelHistoryHandler(
         pathfinding_result
       FROM travel_history
       WHERE user_id = $1
+        AND pathfinding_result ? 'tripFinishedAt'
       ORDER BY traveled_at DESC, id DESC
       LIMIT $2 OFFSET $3
       `,
@@ -160,6 +211,64 @@ export async function listUserTravelHistoryHandler(
         pathfindingResult: row.pathfinding_result,
       })),
     };
+  } finally {
+    client.release();
+  }
+}
+
+export async function saveUserTravelHistoryHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const body = request.body as SaveUserTravelHistoryBody;
+  const userPayload = request.user as { id?: number | string };
+  const userId = Number(userPayload?.id);
+
+  if (!Number.isFinite(userId)) {
+    return reply.code(401).send({ error: "Unauthorized user payload" });
+  }
+
+  if (!isNavigationRouteResult(body.routeResult)) {
+    return reply.code(400).send({ error: "A valid routeResult is required" });
+  }
+
+  const routeResult = body.routeResult;
+  const startedAt = body.startedAt ? new Date(body.startedAt) : null;
+  const traveledAt = body.finishedAt ? new Date(body.finishedAt) : new Date();
+  const safeTraveledAt = Number.isNaN(traveledAt.getTime()) ? new Date() : traveledAt;
+  if (!startedAt || Number.isNaN(startedAt.getTime())) {
+    return reply.code(400).send({ error: "A valid startedAt timestamp is required" });
+  }
+
+  const actualDurationSeconds = Math.max(
+    0,
+    Math.round((safeTraveledAt.getTime() - startedAt.getTime()) / 1000),
+  );
+
+  const client = await fastify.pg.connect();
+  try {
+    await saveTravelHistory(client, {
+      userId,
+      from: routeResult.from,
+      to: routeResult.to,
+      routeIds: getRouteIds(routeResult),
+      transferCount: routeResult.transferCount,
+      bestEffort: routeResult.bestEffort,
+      totalDistanceM: getTotalDistanceM(routeResult),
+      etaSeconds: actualDurationSeconds,
+      graphVersion: String(routeResult.graphVersion ?? "unknown"),
+      pathfindingResult: {
+        ...routeResult,
+        plannedEtaSeconds: routeResult.etaSeconds,
+        tripStartedAt: startedAt.toISOString(),
+        tripFinishedAt: body.finishedAt ?? safeTraveledAt.toISOString(),
+        actualDurationSeconds,
+      },
+      traveledAt: safeTraveledAt,
+    });
+
+    return { message: "Travel history entry saved successfully" };
   } finally {
     client.release();
   }

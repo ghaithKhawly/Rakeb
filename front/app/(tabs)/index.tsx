@@ -42,6 +42,7 @@ import { RouteStepsList } from "@/components/home/RouteStepsList";
 import { getSegmentColor } from "@/utils/routeColors";
 import {
   useRoutingPreferences,
+  useSaveUserTravelHistoryMutation,
   useSetRoutingPreferencesMutation,
 } from "@/hooks/useBusApi";
 import { useLanguage } from "@/hooks/LanguageContext";
@@ -55,6 +56,7 @@ import {
   pointName,
   toMapCoordinates,
 } from "@/utils/homeScreenUtils";
+import { getCachedRoute } from "@/utils/routeReuseCache";
 
 type RouteFilterValue =
   | "balanced"
@@ -226,6 +228,7 @@ export default function HomeScreen() {
     toLat?: string;
     toLng?: string;
     toLabel?: string;
+    cachedRouteId?: string;
   }>();
   const topOverlayInset = Math.max(insets.top, 10) + 8;
   const topMapControlInset = Math.max(topOverlayInset - 2, 0);
@@ -234,6 +237,7 @@ export default function HomeScreen() {
   const sheetScrollRef = useRef<ScrollView>(null);
   const routingPreferencesQuery = useRoutingPreferences();
   const setRoutingPreferencesMutation = useSetRoutingPreferencesMutation();
+  const saveTravelHistoryMutation = useSaveUserTravelHistoryMutation();
   const [mapType, setMapType] = useState<"standard" | "satellite">("standard");
 
   const [currentLocation, setCurrentLocation] = useState<LocationDTO | null>(
@@ -251,9 +255,10 @@ export default function HomeScreen() {
     "start" | "destination"
   >("destination");
   const [selectionPhase, setSelectionPhase] = useState<
-    "destination" | "origin_menu" | "origin_map" | "ready"
+    "destination" | "origin_menu" | "map_pin" | "ready"
   >("destination");
   const [originMenuOpen, setOriginMenuOpen] = useState(false);
+  const [locationPanelTarget, setLocationPanelTarget] = useState<"start" | "destination">("start");
   const [originPanelAnchor, setOriginPanelAnchor] = useState<{
     x: number;
     y: number;
@@ -282,6 +287,10 @@ export default function HomeScreen() {
   } | null>(null);
   const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<RouteFilterValue>("balanced");
+  const [activeTrip, setActiveTrip] = useState<{
+    routeKey: string;
+    startedAt: string;
+  } | null>(null);
   const tripSessionIdRef = useRef(createTripSessionId());
   const lastHandledSharedRouteRef = useRef<string | null>(null);
 
@@ -293,7 +302,23 @@ export default function HomeScreen() {
     return `${count} ${t("route.transfers")}`;
   };
 
-  const isCrosshairMode = selectionPhase === "origin_map";
+  const getRouteUsageKey = (route: NavigationRouteResult, index = selectedAlternativeIndex) => {
+    const routeIds = route.segments
+      .filter((segment) => segment.mode === "bus" && typeof segment.routeId === "number")
+      .map((segment) => segment.routeId)
+      .join(",");
+
+    return [
+      index,
+      route.from.lat.toFixed(5),
+      route.from.lng.toFixed(5),
+      route.to.lat.toFixed(5),
+      route.to.lng.toFixed(5),
+      routeIds,
+    ].join(":");
+  };
+
+  const isCrosshairMode = selectionPhase === "map_pin";
 
   const routeChoices = useMemo(() => {
     if (!routeResult) {
@@ -318,6 +343,19 @@ export default function HomeScreen() {
 
   const expandedRoute =
     expandedRouteIndex !== null ? rankedRouteChoices[expandedRouteIndex] ?? null : null;
+  const activeRouteUsageKey = selectedRoute ? getRouteUsageKey(selectedRoute) : null;
+  const isSelectedRouteActive = !!activeTrip && activeTrip.routeKey === activeRouteUsageKey;
+
+  const setSheetCollapsedState = (collapsed: boolean) => {
+    if (collapsed) {
+      sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
+    }
+    setIsSheetCollapsed(collapsed);
+  };
+
+  const toggleSheetCollapsed = () => {
+    setSheetCollapsedState(!isSheetCollapsed);
+  };
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -462,6 +500,46 @@ export default function HomeScreen() {
   }, [favoriteOrigins, favoritesLoaded]);
 
   useEffect(() => {
+    const cachedRoute = getCachedRoute(
+      typeof sharedParams.cachedRouteId === "string" ? sharedParams.cachedRouteId : undefined,
+    );
+    if (!cachedRoute) {
+      return;
+    }
+
+    const key = `cached:${sharedParams.cachedRouteId}`;
+    if (lastHandledSharedRouteRef.current === key) {
+      return;
+    }
+    lastHandledSharedRouteRef.current = key;
+
+    setCurrentLocation(cachedRoute.from);
+    setDestination(cachedRoute.to);
+    setOriginSearchText(cachedRoute.from.label ?? t("map.startFallback"));
+    setDestinationSearchText(cachedRoute.to.label ?? t("map.destinationFallback"));
+    setRouteResult(cachedRoute);
+    setSelectedAlternativeIndex(0);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+    setSheetCollapsedState(false);
+    hapticSuccess();
+    setMapSegmentHint({
+      label: t("history.cachedRouteLoaded"),
+      color: Colors.dark.primary,
+    });
+
+    requestAnimationFrame(() => {
+      applyRouteToMap(cachedRoute);
+    });
+  }, [sharedParams.cachedRouteId, t]);
+
+  useEffect(() => {
+    if (typeof sharedParams.cachedRouteId === "string" && getCachedRoute(sharedParams.cachedRouteId)) {
+      return;
+    }
+
     const fromLat = Number.parseFloat(sharedParams.fromLat ?? "");
     const fromLng = Number.parseFloat(sharedParams.fromLng ?? "");
     const toLat = Number.parseFloat(sharedParams.toLat ?? "");
@@ -568,11 +646,14 @@ export default function HomeScreen() {
         longitude: number;
         iconName: React.ComponentProps<typeof Ionicons>["name"];
         backgroundColor: string;
+        isBus: boolean;
         label?: string;
       }[];
     }
 
-    return selectedRoute.segments.map((segment, index) => {
+    return selectedRoute.segments
+      .filter((segment) => segment.mode !== "bus")
+      .map((segment, index) => {
       const coordinates = toMapCoordinates(segment);
       const midpoint =
         coordinates[Math.floor(coordinates.length / 2)] ?? {
@@ -604,8 +685,58 @@ export default function HomeScreen() {
         longitude: midpoint.longitude,
         iconName,
         backgroundColor,
+        isBus: segment.mode === "bus",
         label: segment.mode === "bus" ? (segment.routeName ?? `${t("steps.routeFallback")} ${index + 1}`) : undefined,
       };
+    });
+  }, [selectedRoute, t]);
+
+  const busLineLabels = useMemo(() => {
+    if (!selectedRoute) {
+      return [] as {
+        id: string;
+        latitude: number;
+        longitude: number;
+        label: string;
+        color: string;
+        rotation: number;
+      }[];
+    }
+
+    return selectedRoute.segments.flatMap((segment, index) => {
+      if (segment.mode !== "bus") {
+        return [];
+      }
+
+      const coordinates = toMapCoordinates(segment);
+      if (coordinates.length < 2) {
+        return [];
+      }
+
+      const midpointIndex = Math.max(1, Math.floor(coordinates.length / 2));
+      const previousPoint = coordinates[midpointIndex - 1] ?? coordinates[0];
+      const midpoint = coordinates[midpointIndex] ?? coordinates[coordinates.length - 1];
+      if (!previousPoint || !midpoint) {
+        return [];
+      }
+
+      const deltaLat = midpoint.latitude - previousPoint.latitude;
+      const deltaLng = midpoint.longitude - previousPoint.longitude;
+      const rawAngle = Math.atan2(deltaLat, deltaLng) * (180 / Math.PI);
+      const rotation = rawAngle > 90 ? rawAngle - 180 : rawAngle < -90 ? rawAngle + 180 : rawAngle;
+      const length = Math.hypot(deltaLat, deltaLng) || 1;
+      const offset = 0.000055;
+      const latitude = midpoint.latitude + (deltaLng / length) * offset;
+      const longitude = midpoint.longitude - (deltaLat / length) * offset;
+
+      return [{
+        id: `bus-line-label-${segment.routeId ?? "bus"}-${index}`,
+        latitude,
+        longitude,
+        label: segment.routeName ?? `${t("steps.routeFallback")} ${index + 1}`,
+        color: getSegmentColor(segment.routeName ?? t("steps.routeFallback"), index),
+        rotation,
+      }];
     });
   }, [selectedRoute, t]);
 
@@ -802,8 +933,66 @@ export default function HomeScreen() {
       });
     }
 
-    setIsSheetCollapsed(true);
+    setSheetCollapsedState(true);
     setFocusedStepIndex(segmentIndex);
+    if (segment.mode === "bus") {
+      const color = getSegmentColor(segment.routeName ?? t("steps.routeFallback"), segmentIndex);
+      setMapSegmentHint({
+        label: segment.routeName ?? `${t("steps.routeFallback")} ${segmentIndex + 1}`,
+        color,
+      });
+    } else {
+      setMapSegmentHint({
+        label: t("steps.walk"),
+        color: TransitTheme.route.walking,
+      });
+    }
+  };
+
+  const startSelectedRoute = () => {
+    if (!selectedRoute || !activeRouteUsageKey) {
+      return;
+    }
+
+    hapticSuccess();
+    setActiveTrip({
+      routeKey: activeRouteUsageKey,
+      startedAt: new Date().toISOString(),
+    });
+    setMapSegmentHint({
+      label: t("route.trip.started"),
+      color: Colors.dark.primary,
+    });
+  };
+
+  const finishSelectedRoute = () => {
+    if (!selectedRoute || !activeTrip || !isSelectedRouteActive) {
+      return;
+    }
+
+    const finishedAt = new Date().toISOString();
+    saveTravelHistoryMutation.mutate(
+      {
+        routeResult: selectedRoute,
+        startedAt: activeTrip.startedAt,
+        finishedAt,
+      },
+      {
+        onSuccess: () => {
+          hapticSuccess();
+          setActiveTrip(null);
+          setMapSegmentHint({
+            label: t("route.trip.saved"),
+            color: TransitTheme.route.transit,
+          });
+        },
+        onError: (err) => {
+          const message = err instanceof Error ? err.message : t("route.trip.saveFailed");
+          setError(message);
+          Alert.alert(t("route.trip.saveFailedTitle"), message);
+        },
+      },
+    );
   };
 
   const toggleMapType = () => {
@@ -914,14 +1103,14 @@ export default function HomeScreen() {
         onPanResponderRelease: (_, gestureState) => {
           if (gestureState.dy > 22 && !isSheetCollapsed) {
             hapticMedium();
-            setIsSheetCollapsed(true);
+            setSheetCollapsedState(true);
             Keyboard.dismiss();
             return;
           }
 
           if (gestureState.dy < -22 && isSheetCollapsed) {
             hapticMedium();
-            setIsSheetCollapsed(false);
+            setSheetCollapsedState(false);
           }
         },
       }),
@@ -959,6 +1148,7 @@ export default function HomeScreen() {
     const response = await api.post<NavigationRouteResult>(
       "/api/busses/navigation/route",
       payload,
+      { timeout: 120000 },
     );
 
     if (__DEV__) {
@@ -1004,6 +1194,7 @@ export default function HomeScreen() {
     setSelectedAlternativeIndex(0);
     setExpandedRouteIndex(null);
     setFocusedStepIndex(null);
+    setActiveTrip(null);
 
     try {
       const result = await requestRouteForPoints(from, to);
@@ -1011,7 +1202,11 @@ export default function HomeScreen() {
       setExpandedRouteIndex(null);
       setFocusedStepIndex(null);
       applyRouteToMap(result);
-      setIsSheetCollapsed(false);
+      setSheetCollapsedState(false);
+      setMapSegmentHint({
+        label: t("home.routeFound").replace("{count}", String(Math.max(1, rankedRouteChoices.length || result.routes?.length || 1))),
+        color: Colors.dark.primary,
+      });
       hapticSuccess();
     } catch (err) {
       const message = extractApiErrorMessage(err);
@@ -1119,7 +1314,7 @@ export default function HomeScreen() {
               : t("planner.nlp.needClarification")),
       );
       setNaturalTripCandidates(resolution.candidates);
-      setIsSheetCollapsed(false);
+      setSheetCollapsedState(false);
     } catch (err) {
       const messageText = extractApiErrorMessage(err);
       setError(messageText);
@@ -1157,7 +1352,7 @@ export default function HomeScreen() {
     setCurrentLocation(null);
     setDestination(null);
     setSelectionPhase("destination");
-    setIsSheetCollapsed(true);
+    setSheetCollapsedState(true);
     setOriginMenuOpen(false);
     setMapSelectionMode("destination");
     setDestinationSearchText("");
@@ -1165,10 +1360,32 @@ export default function HomeScreen() {
     setSelectedAlternativeIndex(0);
     setExpandedRouteIndex(null);
     setFocusedStepIndex(null);
+    setActiveTrip(null);
     resetNaturalTrip(true);
   };
 
+  const confirmClearRoute = () => {
+    if (!routeResult && !currentLocation && !destination) {
+      clearRoute();
+      return;
+    }
+
+    Alert.alert(
+      t("home.confirm.clearTitle"),
+      t("home.confirm.clearBody"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("planner.clear"),
+          style: "destructive",
+          onPress: clearRoute,
+        },
+      ],
+    );
+  };
+
   const openOriginSelectionPanel = () => {
+    setLocationPanelTarget("start");
     setOriginSearchText(currentLocation?.label ?? t("map.startFallback"));
     setOriginMenuOpen(true);
     originPanelAnim.setValue(0);
@@ -1203,33 +1420,78 @@ export default function HomeScreen() {
     promptOriginSelectionAfterDestination();
   };
 
+  const openDestinationSelectionMenu = () => {
+    hapticSelection();
+    setLocationPanelTarget("destination");
+    setOriginMenuOpen(true);
+    originPanelAnim.setValue(0);
+    Animated.spring(originPanelAnim, {
+      toValue: 1,
+      damping: 18,
+      stiffness: 180,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  };
+
   const beginOriginMapSelection = () => {
     hapticLight();
     closeOriginSelectionPanel();
-    setSelectionPhase("origin_map");
+    setSelectionPhase("map_pin");
     setMapSelectionMode("start");
-    setIsSheetCollapsed(true);
+    setSheetCollapsedState(true);
     setOriginMenuOpen(false);
   };
 
-  const confirmOriginFromMapCenter = () => {
-    if (!mapCenterPoint) {
-      return;
-    }
-    const point: LocationDTO = {
-      lat: mapCenterPoint.lat,
-      lng: mapCenterPoint.lng,
-      label: t("map.pinnedStart"),
-    };
-    setCurrentLocation(point);
-    hapticSelection();
-    setOriginSearchText(point.label ?? t("map.startFallback"));
-    setSelectionPhase("ready");
+  const beginDestinationMapSelection = () => {
+    hapticLight();
+    Keyboard.dismiss();
+    closeOriginSelectionPanel();
+    setSelectionPhase("map_pin");
     setMapSelectionMode("destination");
-    setIsSheetCollapsed(false);
+    setSheetCollapsedState(true);
+    setOriginMenuOpen(false);
     setRouteResult(null);
     setExpandedRouteIndex(null);
     setFocusedStepIndex(null);
+  };
+
+  const confirmLocationFromMapCenter = () => {
+    if (!mapCenterPoint) {
+      return;
+    }
+
+    const point: LocationDTO = mapSelectionMode === "start"
+      ? {
+          lat: mapCenterPoint.lat,
+          lng: mapCenterPoint.lng,
+          label: t("map.pinnedStart"),
+        }
+      : {
+          lat: mapCenterPoint.lat,
+          lng: mapCenterPoint.lng,
+          label: t("map.pinnedDestination"),
+        };
+
+    if (mapSelectionMode === "start") {
+      setCurrentLocation(point);
+      setOriginSearchText(point.label ?? t("map.startFallback"));
+    } else {
+      setDestination(point);
+      setDestinationSearchText(point.label ?? t("map.destinationFallback"));
+    }
+
+    hapticSelection();
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+    setSheetCollapsedState(mapSelectionMode !== "start");
+    setRouteResult(null);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+
+    if (mapSelectionMode === "destination") {
+      promptOriginSelectionAfterDestination();
+    }
   };
 
   const useCurrentLocationAsOrigin = () => {
@@ -1242,7 +1504,7 @@ export default function HomeScreen() {
     closeOriginSelectionPanel();
     hapticSelection();
     setSelectionPhase("ready");
-    setIsSheetCollapsed(false);
+    setSheetCollapsedState(false);
     setRouteResult(null);
     setExpandedRouteIndex(null);
     setFocusedStepIndex(null);
@@ -1285,7 +1547,24 @@ export default function HomeScreen() {
     hapticSelection();
   };
 
-  const searchPlace = async (query: string) => {
+  const applyFavoriteAsDestination = (favorite: FavoriteOrigin) => {
+    const point: LocationDTO = {
+      lat: favorite.lat,
+      lng: favorite.lng,
+      label: favorite.label,
+    };
+    setDestination(point);
+    setDestinationSearchText(point.label ?? t("map.destinationFallback"));
+    setSelectionPhase(currentLocation ? "ready" : "origin_menu");
+    setMapSelectionMode("destination");
+    setRouteResult(null);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+    closeOriginSelectionPanel();
+    hapticSelection();
+  };
+
+  const searchLocation = async (query: string, target: "start" | "destination") => {
     const searchText = query.trim();
     if (!searchText) {
       return;
@@ -1309,12 +1588,21 @@ export default function HomeScreen() {
         label: searchText,
       };
 
-      setDestination(point);
-      setDestinationSearchText(searchText);
+      if (target === "start") {
+        setCurrentLocation(point);
+        setOriginSearchText(searchText);
+        closeOriginSelectionPanel();
+        setSelectionPhase(destination ? "ready" : "origin_menu");
+      } else {
+        setDestination(point);
+        setDestinationSearchText(searchText);
+        setMapSelectionMode("destination");
+        promptOriginSelectionAfterDestination();
+      }
       setRouteResult(null);
-      setMapSelectionMode("destination");
+      setExpandedRouteIndex(null);
+      setFocusedStepIndex(null);
       hapticMedium();
-      promptOriginSelectionAfterDestination();
 
       mapRef.current?.animateToRegion(
         {
@@ -1334,6 +1622,8 @@ export default function HomeScreen() {
       setIsSearchingPlace(false);
     }
   };
+
+  const searchPlace = async (query: string) => searchLocation(query, "destination");
 
   return (
     <SafeAreaView style={[styles.safeArea, isRTL && styles.safeAreaRtl]}>
@@ -1493,6 +1783,39 @@ export default function HomeScreen() {
             />
           ))}
 
+          {busLineLabels.map((label) => (
+            <Marker
+              key={label.id}
+              coordinate={{
+                latitude: label.latitude,
+                longitude: label.longitude,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              zIndex={20}
+              tracksViewChanges
+              onPress={() => {
+                hapticSelection();
+                setMapSegmentHint({
+                  label: label.label,
+                  color: label.color,
+                });
+              }}
+            >
+              <View style={styles.busLineNameMarker}>
+                <View
+                  style={[
+                    styles.busLineNameLabel,
+                    { transform: [{ rotateZ: `${label.rotation}deg` }] },
+                  ]}
+                >
+                  <ThemedText style={[styles.busLineNameText, { color: label.color }]} numberOfLines={1}>
+                    {label.label}
+                  </ThemedText>
+                </View>
+              </View>
+            </Marker>
+          ))}
+
           {segmentNodes.map((node) => (
             <Marker
               key={node.id}
@@ -1538,10 +1861,16 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.mapSegmentModeBadge,
+                  badge.isBus && styles.mapSegmentModeBadgeBus,
                   { backgroundColor: badge.backgroundColor },
                 ]}
               >
                 <Ionicons name={badge.iconName} size={12} color="#FFFFFF" />
+                {badge.isBus && badge.label ? (
+                  <ThemedText style={styles.mapSegmentModeBadgeText} numberOfLines={1}>
+                    {badge.label}
+                  </ThemedText>
+                ) : null}
               </View>
             </Marker>
           ))}
@@ -1557,49 +1886,59 @@ export default function HomeScreen() {
 
       
 
-        <MapSearchControl
-          topInset={topOverlayInset}
-          searchQuery={destinationSearchText}
-          onSearchQueryChange={setDestinationSearchText}
-          onSearchSubmit={() => searchPlace(destinationSearchText)}
-          onOpenOriginMenu={openOriginSelectionMenu}
-          onPanelAnchorLayout={setOriginPanelAnchor}
-          onFocusDestinationOnMap={() => {
-            setMapSelectionMode("destination");
-          }}
-          onUseMapPin={() => {
-            Keyboard.dismiss();
-            setMapSelectionMode("destination");
-            setRouteResult(null);
-            setExpandedRouteIndex(null);
-            setFocusedStepIndex(null);
-          }}
-          onSwapLocations={() => {
-            if (!currentLocation || !destination) {
-              return;
-            }
+        {!isCrosshairMode ? (
+          <MapSearchControl
+            topInset={topOverlayInset}
+            searchQuery={destinationSearchText}
+            onSearchQueryChange={setDestinationSearchText}
+            onSearchSubmit={() => searchPlace(destinationSearchText)}
+            onOpenOriginMenu={openOriginSelectionMenu}
+            onPanelAnchorLayout={setOriginPanelAnchor}
+            onFocusDestinationOnMap={() => {
+              setMapSelectionMode("destination");
+            }}
+            onUseMapPin={beginDestinationMapSelection}
+            onOpenDestinationMenu={openDestinationSelectionMenu}
+            onSwapLocations={() => {
+              if (!currentLocation || !destination) {
+                return;
+              }
 
-            hapticSelection();
-            const previousCurrent = currentLocation;
-            const previousDestination = destination;
-            setCurrentLocation(previousDestination);
-            setDestination(previousCurrent);
-            setDestinationSearchText(previousCurrent.label ?? "");
-            setRouteResult(null);
-            setExpandedRouteIndex(null);
-            setFocusedStepIndex(null);
-            setSelectionPhase("ready");
-            setMapSelectionMode("destination");
-          }}
-          startLabel={currentLocation?.label}
-          destinationLabel={destination?.label}
-        />
+              Alert.alert(
+                t("home.confirm.swapTitle"),
+                t("home.confirm.swapBody"),
+                [
+                  { text: t("common.cancel"), style: "cancel" },
+                  {
+                    text: t("home.confirm.swapAction"),
+                    onPress: () => {
+                      hapticSelection();
+                      const previousCurrent = currentLocation;
+                      const previousDestination = destination;
+                      setCurrentLocation(previousDestination);
+                      setDestination(previousCurrent);
+                      setOriginSearchText(previousDestination.label ?? t("map.startFallback"));
+                      setDestinationSearchText(previousCurrent.label ?? "");
+                      setRouteResult(null);
+                      setExpandedRouteIndex(null);
+                      setFocusedStepIndex(null);
+                      setSelectionPhase("ready");
+                      setMapSelectionMode("destination");
+                    },
+                  },
+                ],
+              );
+            }}
+            startLabel={currentLocation?.label}
+            destinationLabel={destination?.label}
+          />
+        ) : null}
         {isRouting ? (
           <View style={styles.mapLoadingOverlay} pointerEvents="none">
             <ActivityIndicator size="large" color={Kinetic.primary} />
           </View>
         ) : null}
-        <View style={styles.mapFabStack}>
+        {!isCrosshairMode ? <View style={styles.mapFabStack}>
           <TouchableOpacity
             style={styles.mapFabButton}
             activeOpacity={0.85}
@@ -1621,25 +1960,21 @@ export default function HomeScreen() {
           >
             <Ionicons name="navigate" size={17} color="#FFFFFF" />
           </TouchableOpacity>
-        </View>
+        </View> : null}
 
         {isCrosshairMode ? (
           <>
-            <View style={styles.crosshairHeaderCard}>
-              <View style={styles.crosshairHeaderTextWrap}>
-                <ThemedText style={styles.crosshairHeaderTitle}>{t("home.crosshair.title")}</ThemedText>
-                <ThemedText style={styles.crosshairHeaderSubtitle}>{t("home.crosshair.subtitle")}</ThemedText>
-              </View>
-              <TouchableOpacity
-                style={styles.crosshairCloseButton}
-                onPress={() => {
-                  hapticSelection();
-                  promptOriginSelectionAfterDestination();
-                }}
-              >
-                <Ionicons name="close" size={16} color={Colors.dark.text} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.crosshairCloseButton}
+              onPress={() => {
+                hapticSelection();
+                setSelectionPhase(destination || currentLocation ? "ready" : "destination");
+                setMapSelectionMode("destination");
+                setSheetCollapsedState(true);
+              }}
+            >
+              <Ionicons name="close" size={18} color={Colors.dark.text} />
+            </TouchableOpacity>
 
             <View pointerEvents="none" style={styles.fixedCrosshairWrap}>
               <Ionicons name="location" size={42} color="#EF4444" style={styles.fixedPinIcon} />
@@ -1647,8 +1982,10 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.crosshairFooter}>
-              <TouchableOpacity style={styles.crosshairSetButton} onPress={confirmOriginFromMapCenter}>
-                <ThemedText style={styles.crosshairSetButtonText}>{t("home.crosshair.set")}</ThemedText>
+              <TouchableOpacity style={styles.crosshairSetButton} onPress={confirmLocationFromMapCenter}>
+                <ThemedText style={styles.crosshairSetButtonText}>
+                  {mapSelectionMode === "start" ? t("home.crosshair.setStart") : t("home.crosshair.setDestination")}
+                </ThemedText>
               </TouchableOpacity>
             </View>
           </>
@@ -1678,11 +2015,11 @@ export default function HomeScreen() {
                 styles.originPanel,
                 originPanelAnchor
                   ? {
-                      top: originPanelAnchor.y + originPanelAnchor.height + 8,
-                      left: 12,
-                      right: 12,
+                      top: originPanelAnchor.y + originPanelAnchor.height + 6,
+                      left: 14,
+                      right: 14,
                     }
-                  : { top: topOverlayInset + 96, left: 12, right: 12 },
+                  : { top: topOverlayInset + 92, left: 14, right: 14 },
                 {
                   opacity: originPanelAnim,
                   transform: [
@@ -1702,47 +2039,111 @@ export default function HomeScreen() {
                 },
               ]}
             >
-              <View style={styles.originPanelBridge} />
-
-              <View style={styles.originPanelSearchStack}>
-                <View style={styles.originPanelSearchRow}>
-                  <Ionicons name="ellipse-outline" size={14} color="#60A5FA" />
-                  <ThemedText numberOfLines={1} style={styles.originPanelSearchText}>
-                    {currentLocation?.label ?? t("map.startFallback")}
-                  </ThemedText>
+              <View style={styles.originPanelContextRow}>
+                <View style={styles.originPanelContextIcon}>
+                  <Ionicons
+                    name={locationPanelTarget === "start" ? "location-outline" : "ellipse-outline"}
+                    size={13}
+                    color={locationPanelTarget === "start" ? "#EF4444" : "#60A5FA"}
+                  />
                 </View>
-                <View style={styles.originPanelSearchDivider} />
-                <View style={styles.originPanelSearchRow}>
-                  <Ionicons name="location-outline" size={15} color="#EF4444" />
-                  <ThemedText numberOfLines={1} style={styles.originPanelSearchText}>
-                    {destination?.label ?? (destinationSearchText || t("map.destinationFallback"))}
+                <View style={styles.originPanelContextCopy}>
+                  <ThemedText style={styles.originPanelContextLabel}>
+                    {locationPanelTarget === "start" ? t("map.destinationFallback") : t("planner.start")}
+                  </ThemedText>
+                  <ThemedText numberOfLines={1} style={styles.originPanelContextText}>
+                    {locationPanelTarget === "start"
+                      ? destination?.label ?? (destinationSearchText || t("map.destinationFallback"))
+                      : currentLocation?.label ?? (originSearchText || t("map.startFallback"))}
                   </ThemedText>
                 </View>
               </View>
 
               <View style={styles.originPanelHeader}>
                 <View style={styles.originPanelTitleWrap}>
-                  <ThemedText style={styles.originPanelTitle}>{t("home.origin.header")}</ThemedText>
-                  <ThemedText style={styles.originPanelSubtitle}>{originSearchText}</ThemedText>
+                  <ThemedText style={styles.originPanelTitle}>
+                    {locationPanelTarget === "start" ? t("home.origin.header") : t("home.destination.header")}
+                  </ThemedText>
+                  <ThemedText style={styles.originPanelSubtitle}>
+                    {locationPanelTarget === "start"
+                      ? t("home.origin.subtitle")
+                      : t("home.destination.subtitle")}
+                  </ThemedText>
                 </View>
                 <TouchableOpacity style={styles.originPanelClose} onPress={closeOriginSelectionPanel}>
                   <Ionicons name="close" size={18} color={Kinetic.onSurface} />
                 </TouchableOpacity>
               </View>
 
+              <View style={styles.locationSearchRow}>
+                <Ionicons name="search-outline" size={14} color={TransitTheme.panel.caption} />
+                <TextInput
+                  value={locationPanelTarget === "start" ? originSearchText : destinationSearchText}
+                  onChangeText={locationPanelTarget === "start" ? setOriginSearchText : setDestinationSearchText}
+                  placeholder={locationPanelTarget === "start" ? t("home.origin.searchPlaceholder") : t("home.destination.searchPlaceholder")}
+                  placeholderTextColor={TransitTheme.panel.caption}
+                  style={[styles.locationSearchInput, isRTL && styles.naturalTripInputRtl]}
+                  returnKeyType="search"
+                  onSubmitEditing={() => {
+                    void searchLocation(
+                      locationPanelTarget === "start" ? originSearchText : destinationSearchText,
+                      locationPanelTarget,
+                    );
+                  }}
+                  editable={!isSearchingPlace}
+                />
+                <TouchableOpacity
+                  style={[styles.locationSearchButton, isSearchingPlace && styles.originActionButtonDisabled]}
+                  disabled={isSearchingPlace}
+                  onPress={() => {
+                    void searchLocation(
+                      locationPanelTarget === "start" ? originSearchText : destinationSearchText,
+                      locationPanelTarget,
+                    );
+                  }}
+                >
+                  {isSearchingPlace ? (
+                    <ActivityIndicator size="small" color={Colors.dark.primary} />
+                  ) : (
+                    <Ionicons name="arrow-forward" size={14} color={Colors.dark.primary} />
+                  )}
+                </TouchableOpacity>
+              </View>
+
               <View style={styles.originActionsRow}>
-                <TouchableOpacity style={styles.originActionButton} onPress={beginOriginMapSelection}>
+                <TouchableOpacity
+                  style={styles.originActionButton}
+                  onPress={locationPanelTarget === "start" ? beginOriginMapSelection : beginDestinationMapSelection}
+                >
                   <Ionicons name="map-outline" size={14} color="#60A5FA" />
                   <ThemedText style={styles.originActionText}>{t("home.origin.chooseFromMap")}</ThemedText>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.originActionButton, !currentLocation && styles.originActionButtonDisabled]}
-                  onPress={useCurrentLocationAsOrigin}
-                  disabled={!currentLocation}
-                >
-                  <Ionicons name="locate-outline" size={14} color="#60A5FA" />
-                  <ThemedText style={styles.originActionText}>{t("home.origin.useCurrent")}</ThemedText>
-                </TouchableOpacity>
+                {locationPanelTarget === "start" ? (
+                  <TouchableOpacity
+                    style={[styles.originActionButton, !currentLocation && styles.originActionButtonDisabled]}
+                    onPress={useCurrentLocationAsOrigin}
+                    disabled={!currentLocation}
+                  >
+                    <Ionicons name="locate-outline" size={14} color="#60A5FA" />
+                    <ThemedText style={styles.originActionText}>{t("home.origin.useCurrent")}</ThemedText>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.originActionButton, !liveLocation && styles.originActionButtonDisabled]}
+                    onPress={() => {
+                      if (!liveLocation) return;
+                      setDestination(liveLocation);
+                      setDestinationSearchText(liveLocation.label ?? t("map.startFallback"));
+                      closeOriginSelectionPanel();
+                      setSelectionPhase("ready");
+                      setRouteResult(null);
+                    }}
+                    disabled={!liveLocation}
+                  >
+                    <Ionicons name="locate-outline" size={14} color="#60A5FA" />
+                    <ThemedText style={styles.originActionText}>{t("home.destination.useCurrent")}</ThemedText>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.originFavoritesSection}>
@@ -1764,7 +2165,11 @@ export default function HomeScreen() {
                     <TouchableOpacity
                       key={favorite.id}
                       style={styles.originFavoriteRow}
-                      onPress={() => applyFavoriteAsOrigin(favorite)}
+                      onPress={() => (
+                        locationPanelTarget === "start"
+                          ? applyFavoriteAsOrigin(favorite)
+                          : applyFavoriteAsDestination(favorite)
+                      )}
                       activeOpacity={0.85}
                     >
                       <Ionicons name="heart" size={14} color={Colors.dark.primary} />
@@ -1780,7 +2185,7 @@ export default function HomeScreen() {
           </Animated.View>
         ) : null}
 
-        <KeyboardAvoidingView
+        {!isCrosshairMode ? <KeyboardAvoidingView
           style={styles.keyboardAvoiding}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={
@@ -1813,7 +2218,7 @@ export default function HomeScreen() {
             >
               <RoutePlannerControls
                 isCollapsed={isSheetCollapsed}
-                onToggleCollapsed={() => setIsSheetCollapsed((prev) => !prev)}
+                onToggleCollapsed={toggleSheetCollapsed}
                 onOpenPreferences={() => setIsPreferencesModalOpen(true)}
                 activeFilter={activeFilter}
                 onChangeFilter={(value) => {
@@ -1822,12 +2227,18 @@ export default function HomeScreen() {
                 isUpdatingFilter={setRoutingPreferencesMutation.isPending}
                 onRequestRoute={() => void requestRoute()}
                 isRouting={isRouting}
-                onClearRoute={clearRoute}
+                onClearRoute={confirmClearRoute}
                 errorMessage={error}
                 showActionButtons={!routeResult}
               >
                 {!routeResult ? (
                   <View style={styles.plannerAssistStack}>
+                    <HintBanner
+                      title={t("home.startHereTitle")}
+                      message={t("home.startHereBody")}
+                      compact
+                    />
+
                     <View style={styles.naturalTripPanel}>
                       <View style={styles.naturalTripHeader}>
                         <View style={styles.naturalTripTitleRow}>
@@ -1907,20 +2318,20 @@ export default function HomeScreen() {
                       ) : null}
                     </View>
 
-                    <HintBanner
-                      title={t("home.startHereTitle")}
-                      message={t("home.startHereBody")}
-                      compact
-                    />
                   </View>
                 ) : (
                   <View style={styles.resultsPanel}>
                     <View style={styles.resultsTopRow}>
-                      <View>
+                      <View style={styles.resultsTitleCluster}>
+                        <View style={styles.resultsTitleIcon}>
+                          <Ionicons name="navigate-outline" size={16} color={Colors.dark.primary} />
+                        </View>
+                        <View style={styles.resultsTitleTextBlock}>
                         <ThemedText style={styles.resultsPanelTitle}>{t("home.results.publicTransport")}</ThemedText>
                         <ThemedText style={styles.resultsPanelSubtitle}>
                           {t("home.results.tapToExpand")}
                         </ThemedText>
+                      </View>
                       </View>
                       <View style={styles.resultsActionsCompactRow}>
                         <TouchableOpacity
@@ -1938,7 +2349,7 @@ export default function HomeScreen() {
                           style={styles.resultsClearCompactButton}
                           onPress={() => {
                             hapticSelection();
-                            clearRoute();
+                            confirmClearRoute();
                           }}
                           activeOpacity={0.85}
                         >
@@ -1959,28 +2370,81 @@ export default function HomeScreen() {
                           }}
                           activeOpacity={0.85}
                         >
-                          <View>
+                          <View style={styles.expandedRouteHeaderTitle}>
+                            <View style={styles.expandedRouteIcon}>
+                              <Ionicons name="git-branch-outline" size={17} color={Colors.dark.primary} />
+                            </View>
+                            <View style={styles.expandedRouteTitleTextBlock}>
                             <ThemedText style={styles.resultsPanelTitle}>{t("home.results.routeDetails")}</ThemedText>
                             <ThemedText style={styles.resultsPanelSubtitle}>
                               {Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} {t("route.min")} • {formatTransferText(getRouteTransferCount(expandedRoute))}
                             </ThemedText>
                           </View>
-                          <Feather name="chevron-down" size={18} color={Colors.dark.text} />
+                          </View>
+                          <View style={styles.expandedRouteCollapseButton}>
+                            <Feather name="list" size={15} color={Colors.dark.text} />
+                            <ThemedText style={styles.expandedRouteCollapseText}>Routes</ThemedText>
+                          </View>
                         </TouchableOpacity>
 
                         <View style={styles.expandedMetricRow}>
                           <View style={styles.expandedMetricPill}>
-                            <ThemedText style={styles.expandedMetricValue}>{Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} min</ThemedText>
-                            <ThemedText style={styles.expandedMetricLabel}>{t("route.eta")}</ThemedText>
+                            <Ionicons name="time-outline" size={15} color={Colors.dark.primary} />
+                            <View style={styles.expandedMetricTextBlock}>
+                              <ThemedText style={styles.expandedMetricValue}>{Math.max(1, Math.round(expandedRoute.etaSeconds / 60))} min</ThemedText>
+                              <ThemedText style={styles.expandedMetricLabel}>{t("route.eta")}</ThemedText>
+                            </View>
                           </View>
                           <View style={styles.expandedMetricPill}>
-                            <ThemedText style={styles.expandedMetricValue}>{getRouteTransferCount(expandedRoute)}</ThemedText>
-                            <ThemedText style={styles.expandedMetricLabel}>{t("route.transfers")}</ThemedText>
+                            <Ionicons name="swap-horizontal-outline" size={15} color={Colors.dark.primary} />
+                            <View style={styles.expandedMetricTextBlock}>
+                              <ThemedText style={styles.expandedMetricValue}>{getRouteTransferCount(expandedRoute)}</ThemedText>
+                              <ThemedText style={styles.expandedMetricLabel}>{t("route.transfers")}</ThemedText>
+                            </View>
                           </View>
                           <View style={styles.expandedMetricPill}>
-                            <ThemedText style={styles.expandedMetricValue}>{Math.round(expandedRoute.walkingDistanceM)} m</ThemedText>
-                            <ThemedText style={styles.expandedMetricLabel}>{t("route.walk")}</ThemedText>
+                            <Ionicons name="walk-outline" size={15} color={TransitTheme.route.walking} />
+                            <View style={styles.expandedMetricTextBlock}>
+                              <ThemedText style={styles.expandedMetricValue}>{Math.round(expandedRoute.walkingDistanceM)} m</ThemedText>
+                              <ThemedText style={styles.expandedMetricLabel}>{t("route.walk")}</ThemedText>
+                            </View>
                           </View>
+                        </View>
+
+                        <View style={styles.tripActionPanel}>
+                          <View style={styles.tripActionCopy}>
+                            <ThemedText style={styles.tripActionTitle}>
+                              {isSelectedRouteActive ? t("route.trip.inProgress") : t("route.trip.ready")}
+                            </ThemedText>
+                            <ThemedText style={styles.tripActionSubtitle} numberOfLines={1}>
+                              {isSelectedRouteActive
+                                ? t("route.trip.finishHint")
+                                : t("route.trip.startHint")}
+                            </ThemedText>
+                          </View>
+                          <TouchableOpacity
+                            style={[
+                              styles.tripActionButton,
+                              isSelectedRouteActive && styles.tripActionButtonFinish,
+                              saveTravelHistoryMutation.isPending && styles.tripActionButtonDisabled,
+                            ]}
+                            onPress={isSelectedRouteActive ? finishSelectedRoute : startSelectedRoute}
+                            disabled={saveTravelHistoryMutation.isPending}
+                            activeOpacity={0.88}
+                          >
+                            <Ionicons
+                              name={isSelectedRouteActive ? "flag-outline" : "play-outline"}
+                              size={15}
+                              color="#FFFFFF"
+                            />
+                            <ThemedText style={styles.tripActionButtonText}>
+                              {saveTravelHistoryMutation.isPending
+                                ? t("route.trip.saving")
+                                : isSelectedRouteActive
+                                  ? t("route.trip.finish")
+                                  : t("route.trip.start")}
+                            </ThemedText>
+                          </TouchableOpacity>
                         </View>
 
                         <View style={styles.resultsListBlock}>
@@ -2000,6 +2464,8 @@ export default function HomeScreen() {
                           const busNames = choice.segments
                             .filter((segment) => segment.mode === "bus" && segment.routeName)
                             .map((segment) => segment.routeName as string);
+                          const visibleBusNames = busNames.slice(0, 2);
+                          const hiddenBusCount = Math.max(0, busNames.length - visibleBusNames.length);
 
                           return (
                             <TouchableOpacity
@@ -2010,6 +2476,7 @@ export default function HomeScreen() {
                                 setSelectedAlternativeIndex(index);
                                 setExpandedRouteIndex(index);
                                 setFocusedStepIndex(null);
+                                setActiveTrip(null);
                               }}
                               activeOpacity={0.85}
                             >
@@ -2021,15 +2488,22 @@ export default function HomeScreen() {
                                       {Math.round(choice.walkingDistanceM)} m
                                     </ThemedText>
                                   </View>
-                                  {busNames.map((name, busIndex) => (
+                                  {visibleBusNames.map((name, busIndex) => (
                                     <React.Fragment key={`${choice.routeLabel ?? "choice"}-${name}-${busIndex}`}>
-                                      <Ionicons name="chevron-forward" size={12} color={Colors.dark.icon} />
+                                      {busIndex > 0 ? (
+                                        <Ionicons name="chevron-forward" size={12} color={Colors.dark.icon} />
+                                      ) : null}
                                       <View style={styles.modeChipBus}>
                                         <Ionicons name="bus-outline" size={12} color="#FFFFFF" />
                                         <ThemedText numberOfLines={1} style={styles.modeChipText}>{name}</ThemedText>
                                       </View>
                                     </React.Fragment>
                                   ))}
+                                  {hiddenBusCount > 0 ? (
+                                    <View style={styles.modeChipMore}>
+                                      <ThemedText style={styles.modeChipMoreText}>+{hiddenBusCount}</ThemedText>
+                                    </View>
+                                  ) : null}
                                 </View>
                                 <ThemedText style={styles.routeDurationText}>
                                   {Math.max(1, Math.round(choice.etaSeconds / 60))} {t("route.min")}
@@ -2054,7 +2528,7 @@ export default function HomeScreen() {
             </ScrollView>
           </View>
           ) : null}
-        </KeyboardAvoidingView>
+        </KeyboardAvoidingView> : null}
 
         <RoutePreferencesModal
           visible={isPreferencesModalOpen}
@@ -2109,10 +2583,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   mapSegmentModeBadge: {
-    minWidth: 84,
+    minWidth: 28,
     minHeight: 28,
     borderRadius: 11,
-    paddingHorizontal: 16,
+    paddingHorizontal: 8,
     paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
@@ -2120,7 +2594,51 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.65)",
     flexDirection: "row",
     gap: 4,
-    maxWidth: 120,
+    maxWidth: 150,
+  },
+  mapSegmentModeBadgeBus: {
+    minWidth: 78,
+    paddingHorizontal: 10,
+  },
+  mapSegmentModeBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+    maxWidth: 104,
+  },
+  busLineNameMarker: {
+    width: 180,
+    height: 62,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "visible",
+  },
+  busLineNameLabel: {
+    minWidth: 64,
+    maxWidth: 148,
+    minHeight: 24,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(15, 23, 42, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "visible",
+    shadowColor: "#000000",
+    shadowOpacity: 0.14,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  busLineNameText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textAlign: "center",
+    includeFontPadding: false,
   },
   mapSegmentHintBanner: {
     position: "absolute",
@@ -2232,10 +2750,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   crosshairCloseButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#F1F5F9",
+    position: "absolute",
+    top: 54,
+    right: 18,
+    zIndex: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    borderWidth: 1,
+    borderColor: TransitTheme.map.overlayBorder,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2265,65 +2789,63 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     zIndex: 24,
-    backgroundColor: "rgba(15, 23, 42, 0.08)",
+    backgroundColor: "rgba(15, 23, 42, 0.06)",
   },
   originPanel: {
     position: "absolute",
     zIndex: 25,
-    borderRadius: 22,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.bg,
-    padding: 14,
-    gap: 12,
+    padding: 10,
+    gap: 10,
     shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
-  originPanelBridge: {
-    position: "absolute",
-    top: -8,
-    left: 30,
-    width: 18,
-    height: 18,
-    borderTopLeftRadius: 4,
-    backgroundColor: TransitTheme.panel.bg,
-    borderLeftWidth: 1,
-    borderTopWidth: 1,
-    borderColor: TransitTheme.panel.border,
-    transform: [{ rotate: "45deg" }],
-  },
-  originPanelSearchStack: {
-    borderRadius: 14,
+  originPanelContextRow: {
+    minHeight: 42,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
-    overflow: "hidden",
-  },
-  originPanelSearchRow: {
-    minHeight: 36,
-    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
-  originPanelSearchText: {
+  originPanelContextIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
+  originPanelContextCopy: {
     flex: 1,
-    color: TransitTheme.panel.title,
-    fontSize: 13,
-    fontWeight: "600",
+    gap: 1,
   },
-  originPanelSearchDivider: {
-    borderTopWidth: 1,
-    borderTopColor: TransitTheme.panel.border,
+  originPanelContextLabel: {
+    color: TransitTheme.panel.caption,
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  originPanelContextText: {
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "700",
   },
   originPanelHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
   },
   originPanelTitleWrap: {
     flex: 1,
@@ -2331,12 +2853,12 @@ const styles = StyleSheet.create({
   },
   originPanelTitle: {
     color: TransitTheme.panel.title,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "800",
   },
   originPanelSubtitle: {
     color: TransitTheme.panel.caption,
-    fontSize: 12,
+    fontSize: 11,
   },
   originPanelClose: {
     width: 32,
@@ -2347,6 +2869,34 @@ const styles = StyleSheet.create({
     backgroundColor: TransitTheme.panel.cardBg,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
+  },
+  locationSearchRow: {
+    minHeight: 38,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingLeft: 10,
+    paddingRight: 4,
+  },
+  locationSearchInput: {
+    flex: 1,
+    minHeight: 36,
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "700",
+    paddingVertical: 0,
+  },
+  locationSearchButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.iconButtonBg,
   },
   crosshairSetButton: {
     height: 52,
@@ -2409,11 +2959,11 @@ const styles = StyleSheet.create({
   },
   originActionsRow: {
     flexDirection: "row",
-    gap: 8,
+    gap: 7,
   },
   originActionButton: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
@@ -2421,30 +2971,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 8,
+    gap: 5,
+    paddingHorizontal: 6,
   },
   originActionButtonDisabled: {
     opacity: 0.45,
   },
   originActionText: {
     color: TransitTheme.panel.body,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
+    textAlign: "center",
   },
   originFavoritesSection: {
-    gap: 8,
+    gap: 6,
   },
   originFavoritesTitle: {
     color: TransitTheme.panel.caption,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.6,
     textTransform: "uppercase",
   },
   originFavoriteEmpty: {
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: 40,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
@@ -2456,12 +3007,13 @@ const styles = StyleSheet.create({
   },
   originFavoriteEmptyText: {
     color: TransitTheme.panel.caption,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
+    textAlign: "center",
   },
   originFavoriteRow: {
-    minHeight: 50,
-    borderRadius: 12,
+    minHeight: 44,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
@@ -2476,12 +3028,12 @@ const styles = StyleSheet.create({
   },
   originFavoriteLabel: {
     color: TransitTheme.panel.title,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
   },
   originFavoriteMeta: {
     color: TransitTheme.panel.caption,
-    fontSize: 11,
+    fontSize: 10,
   },
   originRecentHeader: {
     color: TransitTheme.panel.caption,
@@ -2541,9 +3093,15 @@ const styles = StyleSheet.create({
     backgroundColor: TransitTheme.panel.bg,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
-    borderRadius: 14,
+    borderRadius: 18,
     padding: 12,
     gap: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+    overflow: "hidden",
   },
   sheetDragHandleWrap: {
     alignItems: "center",
@@ -2564,8 +3122,8 @@ const styles = StyleSheet.create({
     maxHeight: "76%",
   },
   sheetCollapsed: {
-    maxHeight: 122,
-    minHeight: 94,
+    maxHeight: 104,
+    minHeight: 86,
   },
   sheetScroll: {
     flexGrow: 0,
@@ -2655,18 +3213,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   plannerAssistStack: {
-    gap: 8,
+    gap: 6,
   },
   naturalTripPanel: {
-    borderRadius: 12,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
-    padding: 10,
-    gap: 8,
+    padding: 8,
+    gap: 6,
   },
   naturalTripHeader: {
-    minHeight: 24,
+    minHeight: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -2680,7 +3238,7 @@ const styles = StyleSheet.create({
   },
   naturalTripTitle: {
     color: TransitTheme.panel.title,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
   naturalTripResetButton: {
@@ -2694,22 +3252,22 @@ const styles = StyleSheet.create({
     borderColor: TransitTheme.panel.border,
   },
   naturalTripInputRow: {
-    minHeight: 42,
+    minHeight: 36,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: "#F8FAFF",
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 12,
+    paddingLeft: 10,
     paddingRight: 5,
     gap: 6,
   },
   naturalTripInput: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 34,
     color: TransitTheme.panel.title,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
     paddingVertical: 0,
   },
@@ -2718,9 +3276,9 @@ const styles = StyleSheet.create({
     writingDirection: "rtl",
   },
   naturalTripSendButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: Colors.dark.primary,
     alignItems: "center",
     justifyContent: "center",
@@ -2730,8 +3288,8 @@ const styles = StyleSheet.create({
   },
   naturalTripQuestion: {
     color: TransitTheme.panel.body,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: "600",
   },
   naturalTripCandidateWrap: {
@@ -2740,14 +3298,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   naturalTripCandidateChip: {
-    minHeight: 32,
+    minHeight: 28,
     maxWidth: "100%",
     borderRadius: 999,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBgActive,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
@@ -2773,13 +3331,37 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   resultsPanel: {
-    gap: 10,
+    gap: 12,
   },
   resultsTopRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 10,
+  },
+  resultsTitleCluster: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  resultsTitleIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  resultsTitleTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   resultsActionsCompactRow: {
     flexDirection: "row",
@@ -2793,9 +3375,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     borderRadius: 999,
-    backgroundColor: TransitTheme.panel.cardBg,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
   resultsClearCompactText: {
     color: TransitTheme.panel.title,
@@ -2810,8 +3392,8 @@ const styles = StyleSheet.create({
   },
   resultsPanelTitle: {
     color: TransitTheme.panel.title,
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 20,
+    fontWeight: "900",
   },
   resultsPanelSubtitle: {
     color: TransitTheme.panel.caption,
@@ -2867,7 +3449,7 @@ const styles = StyleSheet.create({
     color: TransitTheme.panel.body,
   },
   resultsListBlock: {
-    gap: 12,
+    gap: 6,
   },
   resultsListContent: {
     gap: 12,
@@ -2877,13 +3459,51 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   expandedRouteHeader: {
-    borderBottomWidth: 1,
-    borderBottomColor: TransitTheme.panel.border,
-    paddingBottom: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 10,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 10,
+  },
+  expandedRouteHeaderTitle: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  expandedRouteIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.cardBgActive,
+  },
+  expandedRouteTitleTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  expandedRouteCollapseButton: {
+    minWidth: 74,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+  },
+  expandedRouteCollapseText: {
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "800",
   },
   expandedMetricRow: {
     flexDirection: "row",
@@ -2891,53 +3511,114 @@ const styles = StyleSheet.create({
   },
   expandedMetricPill: {
     flex: 1,
-    borderRadius: 12,
+    minHeight: 62,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+  },
+  expandedMetricTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   expandedMetricValue: {
     color: TransitTheme.panel.title,
-    fontSize: 15,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "900",
   },
   expandedMetricLabel: {
     color: TransitTheme.panel.caption,
     fontSize: 11,
     marginTop: 2,
   },
-  routeCard: {
+  tripActionPanel: {
+    minHeight: 52,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: TransitTheme.panel.border,
     backgroundColor: TransitTheme.panel.cardBg,
-    padding: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  tripActionCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  tripActionTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  tripActionSubtitle: {
+    color: TransitTheme.panel.caption,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  tripActionButton: {
+    minWidth: 92,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.dark.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+  },
+  tripActionButtonFinish: {
+    backgroundColor: TransitTheme.route.transit,
+  },
+  tripActionButtonDisabled: {
+    opacity: 0.65,
+  },
+  tripActionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  routeCard: {
+    minHeight: 48,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: "rgba(255, 255, 255, 0.72)",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   routeCardActive: {
     borderColor: Colors.dark.primary,
-    backgroundColor: TransitTheme.panel.cardBgActive,
+    backgroundColor: "rgba(219, 234, 254, 0.9)",
   },
   routeCardTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   routePathRow: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
+    flexWrap: "nowrap",
+    gap: 4,
     minWidth: 0,
+    overflow: "hidden",
   },
   modeChipWalk: {
+    display: "none",
     borderRadius: 999,
     backgroundColor: Colors.dark.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -2945,34 +3626,48 @@ const styles = StyleSheet.create({
   modeChipBus: {
     borderRadius: 999,
     backgroundColor: "#16A34A",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    maxWidth: "92%",
+    gap: 4,
+    maxWidth: 68,
+  },
+  modeChipMore: {
+    borderRadius: 999,
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  modeChipMoreText: {
+    color: TransitTheme.panel.title,
+    fontSize: 11,
+    fontWeight: "800",
   },
   modeChipText: {
     color: "#FFFFFF",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
     flexShrink: 1,
   },
   routeDurationText: {
     color: TransitTheme.panel.title,
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "900",
     flexShrink: 0,
   },
   routeWindowText: {
     color: TransitTheme.panel.body,
-    fontSize: 13,
-    marginTop: 8,
+    fontSize: 10,
+    marginTop: 1,
   },
   routeSubtitleText: {
     color: TransitTheme.panel.caption,
     fontSize: 12,
     marginTop: 3,
+    display: "none",
   },
   stepCard: {
     borderRadius: 14,

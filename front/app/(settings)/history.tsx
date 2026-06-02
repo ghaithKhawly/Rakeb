@@ -20,6 +20,8 @@ import {
 import { useAuth } from "@/hooks/AuthContext";
 import { useLanguage } from "@/hooks/LanguageContext";
 import { SettingsTopBar } from "@/components/settings/SettingsTopBar";
+import { putCachedRoute } from "@/utils/routeReuseCache";
+import type { NavigationRouteResult } from "../../../types/navigation";
 
 function formatDateTime(value: string | null): string {
   if (!value) {
@@ -48,6 +50,33 @@ function durationToMinText(value: number | null): string {
   return `${Math.max(1, Math.round(value / 60))} min`;
 }
 
+function getSavedRoute(item: { pathfindingResult: unknown }): NavigationRouteResult | null {
+  const route = item.pathfindingResult as Partial<NavigationRouteResult> | null;
+  if (!route || !Array.isArray(route.segments) || !route.from || !route.to) {
+    return null;
+  }
+
+  return route as NavigationRouteResult;
+}
+
+function getRouteNames(item: { routeIds: number[] | null; pathfindingResult: unknown }): string {
+  const route = getSavedRoute(item);
+  const names = route?.segments
+    .filter((segment) => segment.mode === "bus")
+    .map((segment) => segment.routeName)
+    .filter((name): name is string => !!name);
+
+  if (names && names.length > 0) {
+    return Array.from(new Set(names)).join(" -> ");
+  }
+
+  if (item.routeIds && item.routeIds.length > 0) {
+    return item.routeIds.map((id) => `#${id}`).join(" -> ");
+  }
+
+  return "-";
+}
+
 export default function HistoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -57,6 +86,7 @@ export default function HistoryScreen() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [expandedHistoryId, setExpandedHistoryId] = React.useState<number | null>(null);
 
   const historyQuery = useUserTravelHistory({
     limit: 20,
@@ -117,6 +147,30 @@ export default function HistoryScreen() {
         },
       ],
     );
+  };
+
+  const handleUseAgain = (item: (typeof items)[number]) => {
+    const route = getSavedRoute(item);
+    const fromLat = route?.from.lat ?? item.originLat;
+    const fromLng = route?.from.lng ?? item.originLng;
+    const toLat = route?.to.lat ?? item.destLat;
+    const toLng = route?.to.lng ?? item.destLng;
+    const fromLabel = route?.from.label ?? item.originLabel ?? t("history.unknownOrigin");
+    const toLabel = route?.to.label ?? item.destLabel ?? t("history.unknownDest");
+    const cachedRouteId = route ? putCachedRoute(route, `history-${item.id}`) : undefined;
+
+    router.push({
+      pathname: "/(tabs)",
+      params: {
+        cachedRouteId,
+        fromLat: String(fromLat),
+        fromLng: String(fromLng),
+        fromLabel,
+        toLat: String(toLat),
+        toLng: String(toLng),
+        toLabel,
+      },
+    } as never);
   };
 
   return (
@@ -200,39 +254,82 @@ export default function HistoryScreen() {
         ) : null}
 
         {!historyQuery.isLoading && !historyQuery.isError
-          ? items.map((item) => (
-              <View key={item.id} style={styles.entryCard}>
-                <View style={styles.entryTopRow}>
-                  <View style={styles.routeCopy}>
-                    <ThemedText style={styles.routeTitle}>
-                      {item.originLabel ?? t("history.unknownOrigin")} {"->"} {item.destLabel ?? t("history.unknownDest")}
-                    </ThemedText>
-                    <ThemedText style={styles.routeTime}>
+          ? items.map((item) => {
+              const routeNames = getRouteNames(item);
+              const expanded = expandedHistoryId === item.id;
+
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.entryCard}
+                  onPress={() => setExpandedHistoryId(expanded ? null : item.id)}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.entryTopRow}>
+                    <View style={styles.routeCopy}>
+                      <View style={styles.entryKickerRow}>
+                        <Ionicons name="checkmark-circle" size={14} color="#0F766E" />
+                        <ThemedText style={styles.entryKicker}>{t("history.completedTrip")}</ThemedText>
+                      </View>
+                      <ThemedText style={styles.routeTitle} numberOfLines={1}>
+                        {item.originLabel ?? t("history.unknownOrigin")} {"->"} {item.destLabel ?? t("history.unknownDest")}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.compactMetric}>
+                      <ThemedText style={styles.compactMetricValue}>
+                        {durationToMinText(item.totalDurationSeconds)}
+                      </ThemedText>
+                      <Ionicons
+                        name={expanded ? "chevron-up" : "chevron-down"}
+                        size={16}
+                        color={Kinetic.onSurfaceVariant}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.compactMetaRow}>
+                    <ThemedText style={styles.routeNames} numberOfLines={1}>{routeNames}</ThemedText>
+                    <ThemedText style={styles.routeTime} numberOfLines={1}>
                       {item.traveledAt ? formatDateTime(item.traveledAt) : t("history.unknownTime")}
                     </ThemedText>
                   </View>
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    disabled={deleteHistoryMutation.isPending}
-                    onPress={() => handleDelete(item.id)}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#BA1A1A" />
-                  </TouchableOpacity>
-                </View>
 
-                <View style={styles.metaRow}>
-                  <ThemedText style={styles.metaPill}>
-                    {t("history.metric.transfers")}: {item.transferCount ?? 0}
-                  </ThemedText>
-                  <ThemedText style={styles.metaPill}>
-                    {t("history.metric.distance")}: {metersToKmText(item.totalDistanceM)}
-                  </ThemedText>
-                  <ThemedText style={styles.metaPill}>
-                    {t("history.metric.duration")}: {durationToMinText(item.totalDurationSeconds)}
-                  </ThemedText>
-                </View>
-              </View>
-            ))
+                  {expanded ? (
+                    <View style={styles.expandedBlock}>
+                      <View style={styles.metaRow}>
+                        <ThemedText style={styles.metaPill}>
+                          {t("history.metric.transfers")}: {item.transferCount ?? 0}
+                        </ThemedText>
+                        <ThemedText style={styles.metaPill}>
+                          {t("history.metric.distance")}: {metersToKmText(item.totalDistanceM)}
+                        </ThemedText>
+                        <ThemedText style={styles.metaPill}>
+                          {t("history.metric.duration")}: {durationToMinText(item.totalDurationSeconds)}
+                        </ThemedText>
+                      </View>
+
+                      <View style={styles.entryActionsRow}>
+                        <TouchableOpacity
+                          style={styles.useAgainButton}
+                          onPress={() => handleUseAgain(item)}
+                          activeOpacity={0.88}
+                        >
+                          <Ionicons name="repeat-outline" size={15} color={Kinetic.primary} />
+                          <ThemedText style={styles.useAgainText}>{t("history.useAgain")}</ThemedText>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.deleteButtonExpanded}
+                          disabled={deleteHistoryMutation.isPending}
+                          onPress={() => handleDelete(item.id)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#BA1A1A" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })
           : null}
       </ScrollView>
     </View>
@@ -248,8 +345,8 @@ const styles = StyleSheet.create({
     direction: "rtl",
   },
   content: {
-    paddingHorizontal: 20,
-    gap: 12,
+    paddingHorizontal: 14,
+    gap: 8,
   },
   headerCopy: {
     marginTop: -6,
@@ -317,35 +414,81 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   entryCard: {
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: "#FFFFFF",
-    padding: 14,
-    gap: 10,
+    padding: 10,
+    gap: 7,
   },
   entryTopRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
   },
   routeCopy: {
     flex: 1,
     gap: 3,
   },
+  entryKickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  entryKicker: {
+    color: "#0F766E",
+    fontSize: 9,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
   routeTitle: {
     color: Kinetic.onSurface,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "800",
+  },
+  routeNames: {
+    color: Kinetic.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    flex: 1,
   },
   routeTime: {
     color: Kinetic.onSurfaceVariant,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "500",
   },
-  deleteButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+  compactMetric: {
+    minWidth: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
+  },
+  compactMetricValue: {
+    color: Kinetic.onSurface,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  compactMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  expandedBlock: {
+    borderTopWidth: 1,
+    borderTopColor: Kinetic.outlineVariant,
+    paddingTop: 8,
+    gap: 8,
+  },
+  entryActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  deleteButtonExpanded: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFECEB",
@@ -363,5 +506,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 999,
+  },
+  useAgainButton: {
+    flex: 1,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Kinetic.outlineVariant,
+    backgroundColor: Kinetic.surfaceContainer,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  useAgainText: {
+    color: Kinetic.primary,
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

@@ -3,6 +3,8 @@ import { routingWorkerClient } from "../../services/routingWorkerClient";
 import type { NavigationRouteResult, RoutingWorkerPayload } from "../../../../types/navigation";
 import { estimateDirectDistanceM, normalizeWeights } from "../utils/busUtils";
 
+type WalkingMode = NonNullable<RoutingWorkerPayload["walkingMode"]>;
+
 export async function routeWithFallback(
   fastify: FastifyInstance,
   payload: { base: Omit<RoutingWorkerPayload, "walkingMode"> },
@@ -30,7 +32,7 @@ export async function routeWithFallback(
     ),
   );
 
-  const runAttempt = async (walkingMode: "dynamic" | "precomputed") => {
+  const runAttempt = async (walkingMode: WalkingMode) => {
     const startedAt = Date.now();
     try {
       const result = await routingWorkerClient.route(
@@ -56,12 +58,10 @@ export async function routeWithFallback(
     }
   };
 
-  const strictAttemptOrder: Array<"dynamic" | "precomputed"> = directDistanceM > 9_000
-    ? ["precomputed", "dynamic"]
-    : ["dynamic", "precomputed"];
+  const strictAttemptOrder: WalkingMode[] = ["api"];
 
   for (let idx = 0; idx < strictAttemptOrder.length; idx += 1) {
-    const mode = strictAttemptOrder[idx] as "dynamic" | "precomputed";
+    const mode = strictAttemptOrder[idx] as WalkingMode;
     try {
       const result = await runAttempt(mode);
       return { ...result, bestEffort: false };
@@ -106,7 +106,7 @@ export async function routeWithFallback(
   const relaxedPayload: RoutingWorkerPayload = {
     ...payload.base,
     config: relaxedConfig,
-    walkingMode: "dynamic",
+    walkingMode: "api",
     relaxation: {
       allowStartAnchorOverCap: true,
       allowEndAnchorOverCap: false,

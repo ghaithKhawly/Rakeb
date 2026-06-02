@@ -113,6 +113,12 @@ export type TravelHistoryItem = {
   pathfindingResult: unknown;
 };
 
+export type SaveUserTravelHistoryBody = {
+  routeResult: NavigationRouteResult;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
 export type GetUserTravelHistoryResponse = {
   limit: number;
   offset: number;
@@ -158,6 +164,16 @@ export async function getUserTravelHistory(
   const { data } = await api.get<GetUserTravelHistoryResponse>(
     "/api/busses/navigation/history",
     { params: query },
+  );
+  return data;
+}
+
+export async function saveUserTravelHistory(
+  body: SaveUserTravelHistoryBody,
+): Promise<ApiMessageResponse> {
+  const { data } = await api.post<ApiMessageResponse>(
+    "/api/busses/navigation/history",
+    body,
   );
   return data;
 }

@@ -22,6 +22,7 @@ type MapSearchControlProps = {
   onFocusDestinationOnMap?: () => void;
   onSwapLocations?: () => void;
   onUseMapPin?: () => void;
+  onOpenDestinationMenu?: () => void;
   startLabel?: string;
   destinationLabel?: string;
 };
@@ -36,6 +37,7 @@ export function MapSearchControl({
   onFocusDestinationOnMap,
   onSwapLocations,
   onUseMapPin,
+  onOpenDestinationMenu,
   startLabel,
   destinationLabel,
 }: MapSearchControlProps) {
@@ -107,6 +109,17 @@ export function MapSearchControl({
                 size={15}
                 color={searchQuery.trim() ? Colors.dark.primary : TransitTheme.panel.caption}
               />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pinButton}
+              onPress={() => {
+                hapticSelection();
+                onOpenDestinationMenu?.();
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="heart-outline" size={15} color={Colors.dark.primary} />
             </TouchableOpacity>
 
             <TouchableOpacity

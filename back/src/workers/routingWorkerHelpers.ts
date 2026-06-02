@@ -81,7 +81,7 @@ export function logRoutingDiagnostics(
   payload: RoutingWorkerPayload,
   startNeighborsCount: number,
   endNeighborsCount: number,
-  walkingMode: "dynamic" | "precomputed",
+  walkingMode: "api" | "dynamic" | "precomputed",
 ): void {
   const summary = {
     walkingMode,
@@ -253,19 +253,7 @@ export function buildWalkingEdge(
   config: RoutingWorkerPayload["config"],
 ): StepEdge {
   const timeSeconds = distanceM / config.walkingSpeedMps;
-  const linearCoeff = config.walkLinearCoeff ?? WALK_LINEAR_COEFF;
-  const expCoeff = config.walkExpCoeff ?? WALK_EXP_COEFF;
-  const expScaleM = config.walkExpScaleM ?? WALK_EXP_SCALE_M;
-
-  const parts: RouteCostBreakdown = {
-    speed: timeSeconds / T_REF_SECONDS,
-    crowding: 0,
-    price: 0,
-    transfer: 0,
-    walking: (linearCoeff * (distanceM / WALK_DISTANCE_REF_M))
-      + (expCoeff * (Math.exp(distanceM / expScaleM) - 1)),
-    availability: 0,
-  };
+  const parts = buildWalkingComponents(distanceM, timeSeconds, config);
 
   return {
     fromNodeId,
@@ -277,6 +265,48 @@ export function buildWalkingEdge(
     cost: computeCost(parts, config.weights),
     components: parts,
     transferIncrement: 0,
+  };
+}
+
+export function buildWalkingComponents(
+  distanceM: number,
+  timeSeconds: number,
+  config: RoutingWorkerPayload["config"],
+): RouteCostBreakdown {
+  const linearCoeff = config.walkLinearCoeff ?? WALK_LINEAR_COEFF;
+  const expCoeff = config.walkExpCoeff ?? WALK_EXP_COEFF;
+  const expScaleM = config.walkExpScaleM ?? WALK_EXP_SCALE_M;
+
+  return {
+    speed: timeSeconds / T_REF_SECONDS,
+    crowding: 0,
+    price: 0,
+    transfer: 0,
+    walking: (linearCoeff * (distanceM / WALK_DISTANCE_REF_M))
+      + (expCoeff * (Math.exp(distanceM / expScaleM) - 1)),
+    availability: 0,
+  };
+}
+
+export function rebuildWalkingEdgeMetrics(
+  step: StepEdge,
+  distanceM: number,
+  timeSeconds: number,
+  config: RoutingWorkerPayload["config"],
+  polyline?: LocationDTO[],
+): StepEdge {
+  if (step.mode !== "walk") {
+    return step;
+  }
+
+  const components = buildWalkingComponents(distanceM, timeSeconds, config);
+  return {
+    ...step,
+    distanceM,
+    timeSeconds,
+    components,
+    polyline,
+    cost: computeCost(components, config.weights),
   };
 }
 
@@ -376,7 +406,7 @@ export function formatSegment(
 }
 
 export function buildStepPolyline(step: StepEdge, from: LocationDTO, to: LocationDTO): LocationDTO[] {
-  if (step.mode === "bus" && step.polyline && step.polyline.length > 0) {
+  if (step.polyline && step.polyline.length > 0) {
     return ensurePolylineEndpoints(step.polyline, from, to);
   }
 

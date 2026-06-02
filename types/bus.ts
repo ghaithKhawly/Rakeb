@@ -94,6 +94,12 @@ export type DeleteUserTravelHistoryQuery = {
   id: number;
 };
 
+export type SaveUserTravelHistoryBody = {
+  routeResult: unknown;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
 export type SetRoutingPreferencesBody = {
   preferences?: {
     speed?: number;

@@ -491,6 +491,42 @@ export const getUserTravelHistorySchema = {
   },
 };
 
+export const saveUserTravelHistorySchema = {
+  tags: ["Navigation"],
+  summary: "Save a completed user route to travel history",
+  operationId: "saveUserTravelHistory",
+  body: {
+    type: "object",
+    required: ["routeResult"],
+    additionalProperties: false,
+    properties: {
+      routeResult: { type: "object", additionalProperties: true },
+      startedAt: { type: "string" },
+      finishedAt: { type: "string" },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+    },
+    400: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
 export const deleteUserTravelHistorySchema = {
   tags: ["Navigation"],
   summary: "Delete one travel history item for current user",

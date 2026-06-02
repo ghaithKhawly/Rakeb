@@ -117,7 +117,7 @@ export type RoutingWorkerPayload = {
   graph: RoutingGraphSnapshot;
   routeMetrics: RouteLiveMetricForRouting[];
   config: EffectiveRoutingConfig;
-  walkingMode?: "dynamic" | "precomputed"; // internal: not exposed to clients
+  walkingMode?: "api" | "dynamic" | "precomputed"; // internal: not exposed to clients
   relaxation?: {
     allowStartAnchorOverCap?: boolean;
     allowEndAnchorOverCap?: boolean;
@@ -160,6 +160,7 @@ export type NavigationRouteResult = {
   etaSeconds: number;
   segments: RouteSegment[];
   bestEffort: boolean;
+  walkingMode?: RoutingWorkerPayload["walkingMode"];
   routeLabel?: string;
   profileId?: string;
   routes?: NavigationRouteResult[];
