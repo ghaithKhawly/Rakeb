@@ -162,14 +162,22 @@ export function RoutePlannerControls({
                 disabled={isUpdatingFilter}
               />
 
-              <PrimaryButton
-                title={t("planner.clear")}
-                variant="secondary"
+              <TouchableOpacity
+                style={[
+                  styles.clearButton,
+                  (isRouting || isUpdatingFilter) && styles.clearButtonDisabled,
+                ]}
                 disabled={isRouting || isUpdatingFilter}
-                onPress={onClearRoute}
-                style={styles.secondaryButton}
-                textStyle={styles.secondaryButtonText}
-              />
+                onPress={() => {
+                  hapticSelection();
+                  onClearRoute();
+                }}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t("planner.clear")}
+              >
+                <Ionicons name="close" size={20} color={Colors.dark.text} />
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -228,6 +236,7 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: "row",
     gap: 8,
+    alignItems: "center",
   },
   filterWrap: {
     flexDirection: "row",
@@ -260,11 +269,18 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: 14,
   },
-  secondaryButton: {
-    flex: 1,
+  clearButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  secondaryButtonText: {
-    fontSize: 14,
+  clearButtonDisabled: {
+    opacity: 0.45,
   },
   errorText: {
     color: Kinetic.state.error,

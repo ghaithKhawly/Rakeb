@@ -21,7 +21,7 @@ import {
   getUserTravelHistory,
   increaseBusPricesByTenPercent,
   invalidateGraphCache,
-  parseNavigationText,
+  resolveTrip,
   setRoutingPreferences,
   submitBusFeedback,
 } from "@/services/busApi";
@@ -41,7 +41,7 @@ import type {
 } from "../../types/bus";
 import type {
   NavigationRouteRequestBody,
-  ParseNavigationTextRequestBody,
+  ResolveTripRequestBody,
 } from "../../types/navigation";
 
 export const busApiKeys = {
@@ -134,9 +134,9 @@ export function useComputeNavigationRouteMutation() {
   });
 }
 
-export function useParseNavigationTextMutation() {
+export function useResolveTripMutation() {
   return useMutation({
-    mutationFn: (body: ParseNavigationTextRequestBody) => parseNavigationText(body),
+    mutationFn: (body: ResolveTripRequestBody) => resolveTrip(body),
   });
 }
 

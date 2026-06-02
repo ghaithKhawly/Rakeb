@@ -11,6 +11,7 @@ import {
   Share,
   ScrollView,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -24,11 +25,13 @@ import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { LocationDTO } from "../../../types/location";
 import type {
+  LandmarkDTO,
   NavigationRouteRequestBody,
   NavigationRouteResult,
   RouteSegment,
 } from "../../../types/navigation";
 import { api } from "@/config/api";
+import { resolveTrip } from "@/services/busApi";
 import { Colors, Kinetic, TransitTheme } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
 import { HintBanner } from "@/components/ui/HintBanner";
@@ -147,6 +150,18 @@ function nearestRouteFilter(weights: {
   return bestFilter;
 }
 
+function createTripSessionId() {
+  return `trip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function landmarkToLocation(landmark: LandmarkDTO): LocationDTO {
+  return {
+    lat: landmark.lat,
+    lng: landmark.lng,
+    label: landmark.nameAr || landmark.nameEn || landmark.id,
+  };
+}
+
 function compareRouteChoices(
   left: RankedRouteChoice,
   right: RankedRouteChoice,
@@ -256,6 +271,10 @@ export default function HomeScreen() {
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
   const [destinationSearchText, setDestinationSearchText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [naturalTripText, setNaturalTripText] = useState("");
+  const [naturalTripQuestion, setNaturalTripQuestion] = useState<string | null>(null);
+  const [naturalTripCandidates, setNaturalTripCandidates] = useState<LandmarkDTO[]>([]);
+  const [isResolvingTrip, setIsResolvingTrip] = useState(false);
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(true);
   const [mapSegmentHint, setMapSegmentHint] = useState<{
     label: string;
@@ -263,6 +282,7 @@ export default function HomeScreen() {
   } | null>(null);
   const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<RouteFilterValue>("balanced");
+  const tripSessionIdRef = useRef(createTripSessionId());
   const lastHandledSharedRouteRef = useRef<string | null>(null);
 
   const formatTransferText = (count: number) => {
@@ -1003,6 +1023,113 @@ export default function HomeScreen() {
     }
   };
 
+  const resetNaturalTrip = (resetSession = false) => {
+    setNaturalTripText("");
+    setNaturalTripQuestion(null);
+    setNaturalTripCandidates([]);
+    setIsResolvingTrip(false);
+    if (resetSession) {
+      tripSessionIdRef.current = createTripSessionId();
+    }
+  };
+
+  const applyResolvedLandmarks = async (
+    originLandmark: LandmarkDTO,
+    destinationLandmark: LandmarkDTO,
+  ) => {
+    const originPoint = landmarkToLocation(originLandmark);
+    const destinationPoint = landmarkToLocation(destinationLandmark);
+
+    setCurrentLocation(originPoint);
+    setDestination(destinationPoint);
+    setOriginSearchText(originPoint.label ?? t("map.startFallback"));
+    setDestinationSearchText(destinationPoint.label ?? t("map.destinationFallback"));
+    setSelectionPhase("ready");
+    setMapSelectionMode("destination");
+    setRouteResult(null);
+    setSelectedAlternativeIndex(0);
+    setExpandedRouteIndex(null);
+    setFocusedStepIndex(null);
+    setOriginMenuOpen(false);
+    Keyboard.dismiss();
+
+    await requestRoute(originPoint, destinationPoint);
+  };
+
+  const applyPartialLandmarks = (
+    originLandmark: LandmarkDTO | null,
+    destinationLandmark: LandmarkDTO | null,
+  ) => {
+    if (originLandmark) {
+      const originPoint = landmarkToLocation(originLandmark);
+      setCurrentLocation(originPoint);
+      setOriginSearchText(originPoint.label ?? t("map.startFallback"));
+      setSelectionPhase("ready");
+    }
+
+    if (destinationLandmark) {
+      const destinationPoint = landmarkToLocation(destinationLandmark);
+      setDestination(destinationPoint);
+      setDestinationSearchText(destinationPoint.label ?? t("map.destinationFallback"));
+      setSelectionPhase("ready");
+    }
+
+    if (originLandmark || destinationLandmark) {
+      setRouteResult(null);
+      setSelectedAlternativeIndex(0);
+      setExpandedRouteIndex(null);
+      setFocusedStepIndex(null);
+      setOriginMenuOpen(false);
+    }
+  };
+
+  const submitNaturalTrip = async (messageOverride?: string) => {
+    const message = (messageOverride ?? naturalTripText).trim();
+    if (!message || isResolvingTrip || isRouting) {
+      return;
+    }
+
+    setIsResolvingTrip(true);
+    setError(null);
+    setNaturalTripCandidates([]);
+    hapticSelection();
+
+    try {
+      const resolution = await resolveTrip({
+        message,
+        sessionId: tripSessionIdRef.current,
+      });
+
+      applyPartialLandmarks(resolution.origin, resolution.destination);
+
+      if (resolution.status === "resolved" && resolution.origin && resolution.destination) {
+        resetNaturalTrip(true);
+        await applyResolvedLandmarks(resolution.origin, resolution.destination);
+        hapticSuccess();
+        return;
+      }
+
+      setNaturalTripText("");
+      setNaturalTripQuestion(
+        resolution.clarificationQuestion ??
+          (resolution.status === "needs_origin"
+            ? t("planner.nlp.needOrigin")
+            : resolution.status === "needs_destination"
+              ? t("planner.nlp.needDestination")
+              : t("planner.nlp.needClarification")),
+      );
+      setNaturalTripCandidates(resolution.candidates);
+      setIsSheetCollapsed(false);
+    } catch (err) {
+      const messageText = extractApiErrorMessage(err);
+      setError(messageText);
+      setNaturalTripQuestion(messageText);
+      setNaturalTripCandidates([]);
+    } finally {
+      setIsResolvingTrip(false);
+    }
+  };
+
   const applyRouteFilter = async (value: RouteFilterValue) => {
     const previousFilter = activeFilter;
     setActiveFilter(value);
@@ -1038,6 +1165,7 @@ export default function HomeScreen() {
     setSelectedAlternativeIndex(0);
     setExpandedRouteIndex(null);
     setFocusedStepIndex(null);
+    resetNaturalTrip(true);
   };
 
   const openOriginSelectionPanel = () => {
@@ -1091,7 +1219,7 @@ export default function HomeScreen() {
     const point: LocationDTO = {
       lat: mapCenterPoint.lat,
       lng: mapCenterPoint.lng,
-      label: `Start (${mapCenterPoint.lat.toFixed(4)}, ${mapCenterPoint.lng.toFixed(4)})`,
+      label: t("map.pinnedStart"),
     };
     setCurrentLocation(point);
     hapticSelection();
@@ -1220,7 +1348,7 @@ export default function HomeScreen() {
             setMapCenterPoint({
               lat: region.latitude,
               lng: region.longitude,
-              label: `Pinned (${region.latitude.toFixed(4)}, ${region.longitude.toFixed(4)})`,
+              label: t("map.mapPoint"),
             });
           }}
           onPress={(event) => {
@@ -1233,17 +1361,16 @@ export default function HomeScreen() {
               setCurrentLocation({
                 lat: latitude,
                 lng: longitude,
-                label: `Start (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+                label: t("map.pinnedStart"),
               });
             } else {
+              const pinnedDestinationLabel = t("map.pinnedDestination");
               setDestination({
                 lat: latitude,
                 lng: longitude,
-                label: `${t("map.destinationPin")} (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+                label: pinnedDestinationLabel,
               });
-              setDestinationSearchText(
-                `${t("map.destinationPin")} (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
-              );
+              setDestinationSearchText(pinnedDestinationLabel);
               hapticMedium();
               promptOriginSelectionAfterDestination();
             }
@@ -1500,7 +1627,6 @@ export default function HomeScreen() {
           <>
             <View style={styles.crosshairHeaderCard}>
               <View style={styles.crosshairHeaderTextWrap}>
-                <ThemedText style={styles.crosshairHeaderTitle}>Choose start location</ThemedText>
                 <ThemedText style={styles.crosshairHeaderTitle}>{t("home.crosshair.title")}</ThemedText>
                 <ThemedText style={styles.crosshairHeaderSubtitle}>{t("home.crosshair.subtitle")}</ThemedText>
               </View>
@@ -1701,11 +1827,92 @@ export default function HomeScreen() {
                 showActionButtons={!routeResult}
               >
                 {!routeResult ? (
-                  <HintBanner
-                    title={t("home.startHereTitle")}
-                    message={t("home.startHereBody")}
-                    compact
-                  />
+                  <View style={styles.plannerAssistStack}>
+                    <View style={styles.naturalTripPanel}>
+                      <View style={styles.naturalTripHeader}>
+                        <View style={styles.naturalTripTitleRow}>
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color={Colors.dark.primary} />
+                          <ThemedText style={styles.naturalTripTitle}>{t("planner.nlp.title")}</ThemedText>
+                        </View>
+                        {naturalTripQuestion || naturalTripText ? (
+                          <TouchableOpacity
+                            style={styles.naturalTripResetButton}
+                            onPress={() => {
+                              hapticSelection();
+                              resetNaturalTrip(true);
+                            }}
+                            disabled={isResolvingTrip || isRouting}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="refresh-outline" size={14} color={TransitTheme.panel.caption} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.naturalTripInputRow}>
+                        <TextInput
+                          value={naturalTripText}
+                          onChangeText={setNaturalTripText}
+                          placeholder={naturalTripQuestion ?? t("planner.textPlaceholder")}
+                          placeholderTextColor={TransitTheme.panel.caption}
+                          style={[
+                            styles.naturalTripInput,
+                            isRTL && styles.naturalTripInputRtl,
+                          ]}
+                          returnKeyType="send"
+                          onSubmitEditing={() => void submitNaturalTrip()}
+                          editable={!isResolvingTrip && !isRouting}
+                        />
+                        <TouchableOpacity
+                          style={[
+                            styles.naturalTripSendButton,
+                            (!naturalTripText.trim() || isResolvingTrip || isRouting) &&
+                              styles.naturalTripSendButtonDisabled,
+                          ]}
+                          onPress={() => void submitNaturalTrip()}
+                          disabled={!naturalTripText.trim() || isResolvingTrip || isRouting}
+                          activeOpacity={0.85}
+                        >
+                          {isResolvingTrip ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          ) : (
+                            <Ionicons name="send" size={15} color="#FFFFFF" />
+                          )}
+                        </TouchableOpacity>
+                      </View>
+
+                      {naturalTripQuestion ? (
+                        <ThemedText style={styles.naturalTripQuestion}>
+                          {naturalTripQuestion}
+                        </ThemedText>
+                      ) : null}
+
+                      {naturalTripCandidates.length > 0 ? (
+                        <View style={styles.naturalTripCandidateWrap}>
+                          {naturalTripCandidates.map((candidate) => (
+                            <TouchableOpacity
+                              key={candidate.id}
+                              style={styles.naturalTripCandidateChip}
+                              onPress={() => void submitNaturalTrip(candidate.nameAr)}
+                              disabled={isResolvingTrip || isRouting}
+                              activeOpacity={0.85}
+                            >
+                              <Ionicons name="location-outline" size={13} color={Colors.dark.primary} />
+                              <ThemedText style={styles.naturalTripCandidateText}>
+                                {candidate.nameAr}
+                              </ThemedText>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <HintBanner
+                      title={t("home.startHereTitle")}
+                      message={t("home.startHereBody")}
+                      compact
+                    />
+                  </View>
                 ) : (
                   <View style={styles.resultsPanel}>
                     <View style={styles.resultsTopRow}>
@@ -1790,7 +1997,6 @@ export default function HomeScreen() {
                       <View style={styles.resultsListBlock}>
                         {rankedRouteChoices.map((choice, index) => {
                           const active = index === selectedAlternativeIndex;
-                          const walkCount = choice.segments.filter((segment) => segment.mode === "walk").length;
                           const busNames = choice.segments
                             .filter((segment) => segment.mode === "bus" && segment.routeName)
                             .map((segment) => segment.routeName as string);
@@ -1811,14 +2017,16 @@ export default function HomeScreen() {
                                 <View style={styles.routePathRow}>
                                   <View style={styles.modeChipWalk}>
                                     <Ionicons name="walk-outline" size={12} color="#FFFFFF" />
-                                    <ThemedText style={styles.modeChipText}>{walkCount}</ThemedText>
+                                    <ThemedText style={styles.modeChipText}>
+                                      {Math.round(choice.walkingDistanceM)} m
+                                    </ThemedText>
                                   </View>
                                   {busNames.map((name, busIndex) => (
                                     <React.Fragment key={`${choice.routeLabel ?? "choice"}-${name}-${busIndex}`}>
                                       <Ionicons name="chevron-forward" size={12} color={Colors.dark.icon} />
                                       <View style={styles.modeChipBus}>
                                         <Ionicons name="bus-outline" size={12} color="#FFFFFF" />
-                                        <ThemedText style={styles.modeChipText}>{name}</ThemedText>
+                                        <ThemedText numberOfLines={1} style={styles.modeChipText}>{name}</ThemedText>
                                       </View>
                                     </React.Fragment>
                                   ))}
@@ -2446,6 +2654,110 @@ const styles = StyleSheet.create({
     color: "#F87171",
     fontSize: 12,
   },
+  plannerAssistStack: {
+    gap: 8,
+  },
+  naturalTripPanel: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBg,
+    padding: 10,
+    gap: 8,
+  },
+  naturalTripHeader: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  naturalTripTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  naturalTripTitle: {
+    color: TransitTheme.panel.title,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  naturalTripResetButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: TransitTheme.panel.iconButtonBg,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+  },
+  naturalTripInputRow: {
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: "#F8FAFF",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 12,
+    paddingRight: 5,
+    gap: 6,
+  },
+  naturalTripInput: {
+    flex: 1,
+    minHeight: 40,
+    color: TransitTheme.panel.title,
+    fontSize: 13,
+    fontWeight: "600",
+    paddingVertical: 0,
+  },
+  naturalTripInputRtl: {
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  naturalTripSendButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.dark.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  naturalTripSendButtonDisabled: {
+    opacity: 0.45,
+  },
+  naturalTripQuestion: {
+    color: TransitTheme.panel.body,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
+  },
+  naturalTripCandidateWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  naturalTripCandidateChip: {
+    minHeight: 32,
+    maxWidth: "100%",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: TransitTheme.panel.border,
+    backgroundColor: TransitTheme.panel.cardBgActive,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  naturalTripCandidateText: {
+    flexShrink: 1,
+    color: TransitTheme.panel.title,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2619,12 +2931,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexWrap: "wrap",
     gap: 8,
+    minWidth: 0,
   },
   modeChipWalk: {
     borderRadius: 999,
-    backgroundColor: TransitTheme.panel.chipWalkBg,
-    borderWidth: 1,
-    borderColor: TransitTheme.panel.border,
+    backgroundColor: Colors.dark.primary,
     paddingHorizontal: 10,
     paddingVertical: 6,
     flexDirection: "row",
@@ -2639,16 +2950,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    maxWidth: "92%",
   },
   modeChipText: {
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "700",
+    flexShrink: 1,
   },
   routeDurationText: {
     color: TransitTheme.panel.title,
     fontSize: 24,
     fontWeight: "700",
+    flexShrink: 0,
   },
   routeWindowText: {
     color: TransitTheme.panel.body,

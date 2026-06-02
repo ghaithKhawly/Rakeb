@@ -135,10 +135,16 @@ export function SearchInput({
         returnKeyType={returnKeyType}
         autoCorrect={false}
         autoCapitalize="words"
-        style={[styles.input, rtl.textAlign("left"), inputStyle]}
+        style={[
+          styles.input,
+          {
+            textAlign: rtl.textAlign("left"),
+            writingDirection: rtl.writingDirection(),
+          },
+          inputStyle,
+        ]}
         {...a11y.search(accessibilityLabel || placeholder, value)}
         accessibilityHint={accessibilityHint}
-        writingDirection={rtl.writingDirection()}
       />
 
       <View style={styles.rightActions}>

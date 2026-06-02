@@ -7,6 +7,7 @@ import swaggerUI from "@fastify/swagger-ui";
 import cors from "@fastify/cors";
 import { authRoutes } from "./routes/authRoutes";
 import { busRoutes } from "./routes/busRoutes";
+import { tripRoutes } from "./routes/tripRoutes";
 import { graphCache } from "./services/graphCache";
 export const app = Fastify({
   logger: true,
@@ -104,6 +105,7 @@ export async function buildApp() {
   });
 
   app.register(authRoutes, { prefix: "/api/auth" });
+  app.register(tripRoutes, { prefix: "/api/trip" });
   app.register(busRoutes, { prefix: "/api/busses" });
   app.get(
     "/api/protected",

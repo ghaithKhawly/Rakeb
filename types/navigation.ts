@@ -16,6 +16,27 @@ export type RoutingOptions = {
   walkingSpeedMps?: number;
 };
 
+export type LandmarkDTO = {
+  id: string;
+  nameAr: string;
+  nameEn?: string;
+  lat: number;
+  lng: number;
+};
+
+export type ResolveTripRequestBody = {
+  message: string;
+  sessionId: string;
+};
+
+export type ResolveTripResponse = {
+  status: "resolved" | "needs_origin" | "needs_destination" | "needs_clarification";
+  origin: LandmarkDTO | null;
+  destination: LandmarkDTO | null;
+  clarificationQuestion: string | null;
+  candidates: LandmarkDTO[];
+};
+
 export type NavigationRouteRequestBody = {
   from: LocationDTO;
   to: LocationDTO;
@@ -23,25 +44,6 @@ export type NavigationRouteRequestBody = {
   options?: RoutingOptions;
 };
 
-export type ParseNavigationTextRequestBody = {
-  text: string;
-  traceId?: string;
-  conversationId?: string;
-};
-
-export type ParseNavigationTextResponse = {
-  action: string;
-  traceId: string;
-  conversation_id?: string;
-  message?: string;
-  question?: string;
-  reason?: string;
-  from?: LocationDTO & { landmark_id?: string };
-  to?: LocationDTO & { landmark_id?: string };
-  route?: unknown;
-  data?: unknown;
-  [key: string]: unknown;
-};
 
 export type RoutingGraphRoute = {
   id: number;

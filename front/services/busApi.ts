@@ -16,8 +16,8 @@ import type {
   SubmitBusFeedbackBody,
 } from "../../types/bus";
 import type {
-  ParseNavigationTextRequestBody,
-  ParseNavigationTextResponse,
+  ResolveTripRequestBody,
+  ResolveTripResponse,
   RoutingPreferenceWeights,
   NavigationRouteRequestBody,
   NavigationRouteResult,
@@ -142,11 +142,11 @@ export async function computeNavigationRoute(
   return data;
 }
 
-export async function parseNavigationText(
-  body: ParseNavigationTextRequestBody,
-): Promise<ParseNavigationTextResponse> {
-  const { data } = await api.post<ParseNavigationTextResponse>(
-    "/api/busses/navigation/parse-text",
+export async function resolveTrip(
+  body: ResolveTripRequestBody,
+): Promise<ResolveTripResponse> {
+  const { data } = await api.post<ResolveTripResponse>(
+    "/api/trip/resolve",
     body,
   );
   return data;

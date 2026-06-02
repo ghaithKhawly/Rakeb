@@ -110,6 +110,10 @@ const en: Record<string, string> = {
   "planner.textPlaceholder":
     "Try: from Bab Touma to Hamra / من باب توما إلى الحمراء",
   "planner.useText": "Use Text",
+  "planner.nlp.title": "Describe your trip",
+  "planner.nlp.needOrigin": "Where are you starting from?",
+  "planner.nlp.needDestination": "Where do you want to go?",
+  "planner.nlp.needClarification": "Which place did you mean?",
 
   "prefModal.title": "Route preferences",
   "prefModal.subtitle": "Used before each route request",
@@ -138,6 +142,9 @@ const en: Record<string, string> = {
   "map.startFallback": "Your location",
   "map.destinationFallback": "Choose destination",
   "map.destinationPin": "Destination",
+  "map.pinnedStart": "Pinned start",
+  "map.pinnedDestination": "Pinned destination",
+  "map.mapPoint": "Selected on map",
 
   "route.eta": "ETA",
   "route.min": "min",
@@ -308,6 +315,10 @@ const ar: Record<string, string> = {
   "planner.filter.lessCrowded": "ازدحام أقل",
   "planner.textPlaceholder": "مثال: من باب توما إلى الحمرا",
   "planner.useText": "استخدام النص",
+  "planner.nlp.title": "اكتب رحلتك",
+  "planner.nlp.needOrigin": "منين بدك تنطلق؟",
+  "planner.nlp.needDestination": "وين بدك تروح؟",
+  "planner.nlp.needClarification": "أي مكان قصدك؟",
 
   "prefModal.title": "تفضيلات المسار",
   "prefModal.subtitle": "تُستخدم قبل كل طلب مسار",
@@ -336,6 +347,9 @@ const ar: Record<string, string> = {
   "map.startFallback": "موقعك",
   "map.destinationFallback": "اختر الوجهة",
   "map.destinationPin": "الوجهة",
+  "map.pinnedStart": "نقطة البداية",
+  "map.pinnedDestination": "الوجهة المحددة",
+  "map.mapPoint": "محدد على الخريطة",
 
   "route.eta": "الوقت المتوقع",
   "route.min": "د",

@@ -19,7 +19,6 @@ import {
   setRoutingPreferencesSchema,
   submitBusFeedbackSchema,
 } from "../schemas/bus";
-import { naturalNavigationRoutes } from "../features/natural-navigation/routes/naturalNavigationRoutes";
 import { checkInDriverHandler, checkOutDriverHandler, getDriverAvailabilityHandler } from "./handlers/driverHandlers";
 import { listUserTravelHistoryHandler, deleteUserTravelHistoryHandler } from "./handlers/travelHistoryHandlers";
 import {
@@ -43,8 +42,6 @@ import {
 import { saveRoutingPreferences } from "./handlers/busHandlers";
 
 export async function busRoutes(fastify: FastifyInstance) {
-  await naturalNavigationRoutes(fastify);
-
   const enableQuickTestRoutes =
     process.env.ENABLE_DEV_QUICK_TEST_ROUTES === "1" || process.env.NODE_ENV !== "production";
 

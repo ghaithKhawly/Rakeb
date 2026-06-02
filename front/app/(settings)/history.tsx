@@ -205,7 +205,7 @@ export default function HistoryScreen() {
                 <View style={styles.entryTopRow}>
                   <View style={styles.routeCopy}>
                     <ThemedText style={styles.routeTitle}>
-                      {item.originLabel ?? t("history.unknownOrigin")} -> {item.destLabel ?? t("history.unknownDest")}
+                      {item.originLabel ?? t("history.unknownOrigin")} {"->"} {item.destLabel ?? t("history.unknownDest")}
                     </ThemedText>
                     <ThemedText style={styles.routeTime}>
                       {item.traveledAt ? formatDateTime(item.traveledAt) : t("history.unknownTime")}

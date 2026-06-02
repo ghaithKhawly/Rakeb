@@ -2,7 +2,7 @@ import { isAxiosError } from "axios";
 
 import type {
   NavigationRouteResult,
-  ParseNavigationTextResponse,
+  ResolveTripResponse,
   RouteSegment,
 } from "../../types/navigation";
 
@@ -265,22 +265,21 @@ export function isNavigationRouteResult(
 }
 
 export function buildNaturalRouteFallbackMessage(
-  response: ParseNavigationTextResponse,
+  response: ResolveTripResponse,
 ): string {
-  if (response.message && response.message.trim().length > 0) {
-    return response.message;
+  if (response.clarificationQuestion) {
+    return response.clarificationQuestion;
   }
 
-  switch (response.reason) {
-    case "feature_disabled":
-      return "Text route parsing is currently disabled on the server (NLP_ENABLED is off).";
-    case "parse_failed":
-      return "Could not parse that request. Try clearer start/destination names or choose points on the map.";
-    case "unknown_landmark":
-      return "Could not recognize one of the places. Try another wording or pick points on the map.";
-    case "empty_or_invalid_input":
-      return "Please enter a route request first.";
+  switch (response.status) {
+    case "needs_origin":
+      return "منين بدك تنطلق؟";
+    case "needs_destination":
+      return "وين بدك تروح؟";
+    case "needs_clarification":
+      return "ممكن توضح المكان المقصود؟";
+    case "resolved":
     default:
-      return "Could not parse your text request. Please pick points on the map.";
+      return "Trip request resolved.";
   }
 }

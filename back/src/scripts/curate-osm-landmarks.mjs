@@ -14,26 +14,53 @@ const ALLOWED_CATEGORIES = new Set([
   "clinic",
   "university",
   "bus_station",
+  "bus_stop",
   "mosque",
   "school",
+  "square",
+  "neighborhood",
+  "market",
+  "mall",
+  "park",
+  "museum",
+  "attraction",
+  "public_building",
 ]);
 
 const CATEGORY_CAPS = {
-  hospital: 100,
-  clinic: 80,
+  hospital: 80,
+  clinic: 40,
   university: 60,
-  bus_station: 50,
+  bus_station: 70,
+  bus_stop: 80,
   mosque: 60,
-  school: 60,
+  school: 30,
+  square: 80,
+  neighborhood: 120,
+  market: 60,
+  mall: 40,
+  park: 60,
+  museum: 40,
+  attraction: 80,
+  public_building: 60,
 };
 
 const CATEGORY_PRIORITY = {
-  hospital: 100,
-  university: 90,
+  square: 100,
+  neighborhood: 95,
+  hospital: 90,
+  university: 85,
   bus_station: 80,
-  clinic: 70,
-  mosque: 60,
-  school: 50,
+  bus_stop: 70,
+  clinic: 60,
+  mosque: 55,
+  school: 45,
+  market: 75,
+  mall: 72,
+  park: 68,
+  museum: 65,
+  attraction: 62,
+  public_building: 58,
   other: 0,
 };
 
@@ -44,6 +71,9 @@ const EXCLUDED_NAMES = new Set([
   "university",
   "mosque",
   "bus station",
+  "bus stop",
+  "square",
+  "saha",
   "مستشفى",
   "عيادة",
   "مدرسة",
@@ -51,6 +81,13 @@ const EXCLUDED_NAMES = new Set([
   "جامع",
   "مسجد",
   "محطة",
+  "ساحة",
+  "حي",
+  "ضاحية",
+  "سوق",
+  "مول",
+  "حديقة",
+  "متحف",
 ]);
 
 const GENERIC_NAME_PATTERNS = {
@@ -59,8 +96,99 @@ const GENERIC_NAME_PATTERNS = {
   hospital: /(مشفى|مستشفى|hospital)/i,
   university: /(جامعة|university)/i,
   bus_station: /(محطة|كراج|station|garage|terminal)/i,
+  bus_stop: /(موقف|محطة|bus stop|stop)/i,
   mosque: /(مسجد|جامع|mosque)/i,
+  square: /(ساحة|ميدان|square|plaza|circle)/i,
+  neighborhood: /(حي|حارة|ضاحية|suburb|neighbourhood|neighborhood|quarter)/i,
+  market: /(سوق|market|souq|bazaar)/i,
+  mall: /(مول|mall|shopping)/i,
+  park: /(حديقة|منتزه|park|garden)/i,
+  museum: /(متحف|museum)/i,
+  attraction: /(معلم|attraction|monument)/i,
+  public_building: /(وزارة|مديرية|مؤسسة|قصر|مكتبة|مركز ثقافي|ministry|library|cultural center)/i,
 };
+
+const LEADING_PLACE_TYPES = [
+  "ساحة",
+  "دوار",
+  "كراج",
+  "كراجات",
+  "موقف",
+  "محطة",
+  "جامعة",
+  "كلية",
+  "مستشفى",
+  "مشفى",
+  "مستوصف",
+  "عيادة",
+  "عيادات",
+  "مركز",
+  "مجمع",
+  "مدرسة",
+  "ثانوية",
+  "اعدادية",
+  "إعدادية",
+  "اكاديمية",
+  "أكاديمية",
+  "معهد",
+  "جامع",
+  "مسجد",
+  "سوق",
+  "مول",
+  "حديقة",
+  "متحف",
+  "حي",
+  "ضاحية",
+  "باب",
+  "جسر",
+  "ميدان",
+  "دكتور",
+  "الدكتور",
+  "دكتورة",
+  "الدكتورة",
+  "د",
+];
+
+const GENERIC_ALIASES = new Set([
+  "",
+  "ال",
+  "ساحه",
+  "دوار",
+  "كراج",
+  "كراجات",
+  "موقف",
+  "محطه",
+  "جامعه",
+  "كليه",
+  "مستشفي",
+  "مشفي",
+  "مستوصف",
+  "عياده",
+  "عيادات",
+  "مركز",
+  "مجمع",
+  "مدرسه",
+  "ثانويه",
+  "اعداديه",
+  "اكاديميه",
+  "معهد",
+  "جامع",
+  "مسجد",
+  "سوق",
+  "مول",
+  "حديقه",
+  "متحف",
+  "حي",
+  "ضاحيه",
+  "باب",
+  "جسر",
+  "ميدان",
+  "دكتور",
+  "الدكتور",
+  "دكتوره",
+  "الدكتوره",
+  "د",
+]);
 
 const MANUAL_BLOCKLIST_IDS = new Set([]);
 const MANUAL_BLOCKLIST_NAME_SNIPPETS = [
@@ -74,6 +202,21 @@ function usage() {
 
 function normalizeText(value) {
   return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeArabic(value) {
+  return normalizeText(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[إأآا]/g, "ا")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/ـ/g, "")
+    .replace(/[،,.!?؟;:()[\]{}"']/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -96,27 +239,61 @@ function inDamascus(lat, lng) {
 function detectCategory(tags) {
   const amenity = normalizeKey(tags?.amenity);
   const building = normalizeKey(tags?.building);
+  const place = normalizeKey(tags?.place);
+  const highway = normalizeKey(tags?.highway);
+  const shop = normalizeKey(tags?.shop);
+  const leisure = normalizeKey(tags?.leisure);
+  const tourism = normalizeKey(tags?.tourism);
+  const historic = normalizeKey(tags?.historic);
+  const office = normalizeKey(tags?.office);
 
   if (amenity === "hospital") return "hospital";
   if (amenity === "clinic") return "clinic";
   if (amenity === "university") return "university";
   if (amenity === "bus_station") return "bus_station";
+  if (highway === "bus_stop") return "bus_stop";
   if (amenity === "school") return "school";
   if (building === "mosque" || amenity === "place_of_worship") return "mosque";
+  if (amenity === "marketplace" || amenity === "market") return "market";
+  if (shop === "mall" || building === "retail") return "mall";
+  if (leisure === "park" || leisure === "garden") return "park";
+  if (tourism === "museum") return "museum";
+  if (tourism === "attraction" || tourism === "viewpoint" || historic) return "attraction";
+  if (amenity === "library" || amenity === "townhall" || office === "government" || building === "public") {
+    return "public_building";
+  }
+  if (place === "square") return "square";
+  if (place === "suburb" || place === "neighbourhood" || place === "neighborhood" || place === "quarter") {
+    return "neighborhood";
+  }
 
   return "other";
 }
 
 function toRecordFromOverpassElement(el) {
-  if (el?.type !== "node") return null;
-  if (typeof el.lat !== "number" || typeof el.lon !== "number") return null;
+  if (!el?.type) return null;
 
-  return {
-    sourceId: `${el.type}/${el.id}`,
-    lat: el.lat,
-    lng: el.lon,
-    tags: el.tags ?? {},
-  };
+  if (el.type === "node") {
+    if (typeof el.lat !== "number" || typeof el.lon !== "number") return null;
+    return {
+      sourceId: `${el.type}/${el.id}`,
+      lat: el.lat,
+      lng: el.lon,
+      tags: el.tags ?? {},
+    };
+  }
+
+  if ((el.type === "way" || el.type === "relation") && el.center) {
+    if (typeof el.center.lat !== "number" || typeof el.center.lon !== "number") return null;
+    return {
+      sourceId: `${el.type}/${el.id}`,
+      lat: el.center.lat,
+      lng: el.center.lon,
+      tags: el.tags ?? {},
+    };
+  }
+
+  return null;
 }
 
 function toRecordFromGeoJsonFeature(feature) {
@@ -186,15 +363,49 @@ function collectAliases(tags, names) {
     .filter(Boolean);
 
   const uniq = new Set();
+  const addAlias = (value) => {
+    const normalized = normalizeArabic(value);
+    if (normalized.length < 2 || GENERIC_ALIASES.has(normalized)) return;
+    uniq.add(value);
+    uniq.add(normalized);
+    uniq.add(normalized.toLowerCase());
+  };
+  const withoutLeadingArticle = (value) => normalizeArabic(value)
+    .split(" ")
+    .map((token) => token.startsWith("ال") && token.length > 3 ? token.slice(2) : token)
+    .join(" ");
+
   for (const item of raw) {
-    uniq.add(item);
-    uniq.add(item.toLowerCase());
+    addAlias(item);
+    addAlias(item.toLowerCase());
+
+    const normalized = normalizeArabic(item);
+    addAlias(withoutLeadingArticle(normalized));
+
+    const numberFirst = normalized.match(/^(\d+)\s+(.+)$/u);
+    if (numberFirst?.[1] && numberFirst[2]) {
+      addAlias(`${numberFirst[2]} ${numberFirst[1]}`);
+    }
+
+    for (const type of LEADING_PLACE_TYPES) {
+      const normalizedType = normalizeArabic(type);
+      if (normalized.startsWith(`${normalizedType} `)) {
+        const rest = normalized.slice(normalizedType.length).trim();
+        addAlias(rest);
+        addAlias(withoutLeadingArticle(rest));
+      }
+    }
+
+    addAlias(normalized.replace(/مستشفي/g, "مشفي"));
+    addAlias(normalized.replace(/مشفي/g, "مستشفي"));
+    addAlias(normalized.replace(/كراجات/g, "كراج"));
+    addAlias(normalized.replace(/كراج/g, "كراجات"));
   }
 
-  if (names.nameAr) uniq.add(names.nameAr);
-  if (names.nameEn) uniq.add(names.nameEn);
+  if (names.nameAr) addAlias(names.nameAr);
+  if (names.nameEn) addAlias(names.nameEn);
 
-  return Array.from(uniq).slice(0, 12);
+  return Array.from(uniq).slice(0, 16);
 }
 
 function isLikelyGenericName(name, category) {
@@ -256,8 +467,8 @@ function main() {
   }
 
   const rootDir = process.cwd();
-  const landmarksFile = path.join(rootDir, "src", "features", "natural-navigation", "data", "damascusLandmarks.ts");
-  const outputFile = path.join(rootDir, "src", "features", "natural-navigation", "data", "damascusLandmarks.osm.ts");
+  const landmarksFile = path.join(rootDir, "src", "data", "coreDamascus.ts");
+  const outputFile = path.join(rootDir, "src", "data", "damascusLandmarks.osm.ts");
 
   const raw = JSON.parse(fs.readFileSync(inputPath, "utf8"));
   const records = extractRecords(raw);
@@ -315,8 +526,17 @@ function main() {
     clinic: 0,
     university: 0,
     bus_station: 0,
+    bus_stop: 0,
     mosque: 0,
     school: 0,
+    square: 0,
+    neighborhood: 0,
+    market: 0,
+    mall: 0,
+    park: 0,
+    museum: 0,
+    attraction: 0,
+    public_building: 0,
   };
 
   const final = [];

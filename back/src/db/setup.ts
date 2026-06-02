@@ -557,52 +557,6 @@ export async function setupDatabase(fastify: FastifyInstance) {
       END $$;
     `);
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS nlp_conversations (
-        conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        trace_id TEXT NOT NULL,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        partial_origin_id TEXT,
-        partial_destination_id TEXT,
-        last_known_destination_id TEXT,
-        clarification_type TEXT,
-        disambiguation_candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
-      );
-      CREATE INDEX IF NOT EXISTS idx_nlp_conversations_expires_at ON nlp_conversations(expires_at);
-      CREATE INDEX IF NOT EXISTS idx_nlp_conversations_trace_id ON nlp_conversations(trace_id);
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS llm_parse_log (
-        id BIGSERIAL PRIMARY KEY,
-        trace_id TEXT NOT NULL,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        request_text TEXT NOT NULL,
-        parsed_intent JSONB,
-        fallback_triggered BOOLEAN NOT NULL DEFAULT FALSE,
-        latency_ms INTEGER,
-        scenario_type TEXT,
-        nlp_provider TEXT,
-        nlp_model TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_llm_parse_log_created_at ON llm_parse_log(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_llm_parse_log_scenario_type ON llm_parse_log(scenario_type);
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS nlp_unknown_locations (
-        id BIGSERIAL PRIMARY KEY,
-        trace_id TEXT NOT NULL,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        unknown_locations JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_nlp_unknown_locations_created_at ON nlp_unknown_locations(created_at DESC);
-    `);
-
     console.log("✅ Database tables created/verified");
   } catch (error) {
     console.error("❌ Database setup error:", error);

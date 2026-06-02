@@ -81,3 +81,47 @@ export const navigationRouteSchema = {
     },
   },
 };
+
+export const resolveTripSchema = {
+  tags: ["Navigation"],
+  summary: "Resolve a natural language trip request",
+  operationId: "resolveTrip",
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    required: ["message", "sessionId"],
+    additionalProperties: false,
+    properties: {
+      message: { type: "string", minLength: 1, maxLength: 2000 },
+      sessionId: { type: "string", minLength: 1, maxLength: 200 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      additionalProperties: true,
+    },
+    400: {
+      type: "object",
+      required: ["error"],
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      required: ["error"],
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    500: {
+      type: "object",
+      required: ["error"],
+      properties: {
+        error: { type: "string" },
+        details: { type: "string" },
+      },
+    },
+  },
+};
