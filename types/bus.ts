@@ -1,9 +1,10 @@
 export type CrowdingTendency = "low" | "medium" | "high";
+export type TransitRouteType = "bus" | "microbus";
 
 export type BusRouteDTO = {
   id: number;
   name: string;
-  type: "bus" | string;
+  type: TransitRouteType | string;
   avg_speed_kmh: number | null;
   base_price: number | null;
   frequency_minutes: number | null;
@@ -139,4 +140,46 @@ export type DriverCheckOutResponse = {
 
 export type RouteAvailabilityResponse = {
   availability: RouteAvailabilitySummary[];
+};
+
+export type RouteDrawCoordinate = {
+  lat: number;
+  lng: number;
+};
+
+export type CreateAdminRouteBody = {
+  name: string;
+  transportType: TransitRouteType;
+  basePrice?: number;
+  avgSpeedKmh?: number;
+  maxActiveBuses?: number;
+  snapToRoads?: boolean;
+  coordinates: RouteDrawCoordinate[];
+};
+
+export type CreateAdminRouteResponse = {
+  message: string;
+  route: BusRouteDTO;
+  graph: {
+    nodesCreated: number;
+    edgesCreated: number;
+  };
+  snap?: {
+    applied: boolean;
+    source: string;
+    distanceM: number | null;
+    durationSeconds: number | null;
+  };
+};
+
+export type SnapAdminRouteBody = {
+  coordinates: RouteDrawCoordinate[];
+};
+
+export type SnapAdminRouteResponse = {
+  coordinates: RouteDrawCoordinate[];
+  distanceM: number | null;
+  durationSeconds: number | null;
+  source: string;
+  fallbackReason?: string;
 };

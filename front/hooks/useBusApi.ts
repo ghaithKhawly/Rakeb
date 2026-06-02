@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/AuthContext";
 
 import {
   computeNavigationRoute,
+  createAdminRoute,
   deleteAllBusses,
   deleteBusById,
   deleteUserTravelHistory,
@@ -24,12 +25,14 @@ import {
   resolveTrip,
   saveUserTravelHistory,
   setRoutingPreferences,
+  snapAdminRoute,
   submitBusFeedback,
 } from "@/services/busApi";
 
 import type {
   DeleteBusesQuery,
   DeleteBusQuery,
+  CreateAdminRouteBody,
   DeleteUserTravelHistoryQuery,
   GetBusesQuery,
   GetGraphQuery,
@@ -38,6 +41,7 @@ import type {
   GraphCacheQuery,
   InvalidateGraphQuery,
   SetRoutingPreferencesBody,
+  SnapAdminRouteBody,
   SubmitBusFeedbackBody,
 } from "../../types/bus";
 import type {
@@ -170,6 +174,27 @@ export function useDeleteBusByIdMutation() {
         invalidate(queryClient, [...busApiKeys.all, "graphCacheStatus"]),
       ]);
     },
+  });
+}
+
+export function useCreateAdminRouteMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateAdminRouteBody) => createAdminRoute(body),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidate(queryClient, [...busApiKeys.all, "busses"]),
+        invalidate(queryClient, [...busApiKeys.all, "graphCacheStatus"]),
+        invalidate(queryClient, [...busApiKeys.all, "graphSnapshot"]),
+        invalidate(queryClient, [...busApiKeys.all, "routeLiveMetrics"]),
+      ]);
+    },
+  });
+}
+
+export function useSnapAdminRouteMutation() {
+  return useMutation({
+    mutationFn: (body: SnapAdminRouteBody) => snapAdminRoute(body),
   });
 }
 

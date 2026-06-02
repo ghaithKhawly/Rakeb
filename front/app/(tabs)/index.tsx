@@ -21,7 +21,6 @@ import { useLocalSearchParams } from "expo-router";
 import MapView, { Marker, Polyline } from "@/components/maps/MapViewCompat";
 import type { Region } from "@/components/maps/MapViewCompat";
 import * as Location from "expo-location";
-import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { LocationDTO } from "../../../types/location";
 import type {
@@ -57,6 +56,7 @@ import {
   toMapCoordinates,
 } from "@/utils/homeScreenUtils";
 import { getCachedRoute } from "@/utils/routeReuseCache";
+import { getStoredValue, setStoredValue } from "@/utils/storage";
 
 type RouteFilterValue =
   | "balanced"
@@ -459,7 +459,7 @@ export default function HomeScreen() {
   useEffect(() => {
     const loadFavorites = async () => {
       try {
-        const stored = await SecureStore.getItemAsync(FAVORITE_ORIGINS_STORAGE_KEY);
+        const stored = await getStoredValue(FAVORITE_ORIGINS_STORAGE_KEY);
         if (!stored) {
           setFavoritesLoaded(true);
           return;
@@ -493,7 +493,7 @@ export default function HomeScreen() {
       return;
     }
 
-    void SecureStore.setItemAsync(
+    void setStoredValue(
       FAVORITE_ORIGINS_STORAGE_KEY,
       JSON.stringify(favoriteOrigins),
     );

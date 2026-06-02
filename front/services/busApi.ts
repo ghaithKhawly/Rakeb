@@ -2,6 +2,8 @@ import { api } from "@/config/api";
 
 import type {
   BusRouteDTO,
+  CreateAdminRouteBody,
+  CreateAdminRouteResponse,
   DeleteBusesQuery,
   DeleteBusQuery,
   DeleteUserTravelHistoryQuery,
@@ -13,6 +15,8 @@ import type {
   GraphCacheQuery,
   InvalidateGraphQuery,
   SetRoutingPreferencesBody,
+  SnapAdminRouteBody,
+  SnapAdminRouteResponse,
   SubmitBusFeedbackBody,
 } from "../../types/bus";
 import type {
@@ -74,6 +78,9 @@ export type RouteLiveMetric = {
   effectiveCrowdingScore: number | null;
   effectiveSlownessMultiplier: number;
   suggestedAvgSpeedKmh: number | null;
+  activeDriverCount: number;
+  maxActiveBuses: number;
+  availabilityRatio: number;
   lastReportAt: string | null;
   updatedAt: string | null;
 };
@@ -247,6 +254,26 @@ export async function getBusById(id: number): Promise<GetBusResponse> {
   const { data } = await api.get<GetBusResponse>("/api/busses/bus", {
     params: { id },
   });
+  return data;
+}
+
+export async function createAdminRoute(
+  body: CreateAdminRouteBody,
+): Promise<CreateAdminRouteResponse> {
+  const { data } = await api.post<CreateAdminRouteResponse>(
+    "/api/busses/admin/routes",
+    body,
+  );
+  return data;
+}
+
+export async function snapAdminRoute(
+  body: SnapAdminRouteBody,
+): Promise<SnapAdminRouteResponse> {
+  const { data } = await api.post<SnapAdminRouteResponse>(
+    "/api/busses/admin/routes/snap",
+    body,
+  );
   return data;
 }
 

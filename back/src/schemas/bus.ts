@@ -92,6 +92,150 @@ export const getBusSchema = {
   },
 };
 
+export const createAdminRouteSchema = {
+  tags: ["Admin"],
+  summary: "Create a drawn transit route",
+  operationId: "createAdminRoute",
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    required: ["name", "transportType", "coordinates"],
+    additionalProperties: false,
+    properties: {
+      name: { type: "string", minLength: 2, maxLength: 120 },
+      transportType: { type: "string", enum: ["bus", "microbus"] },
+      basePrice: { type: "number", minimum: 0 },
+      avgSpeedKmh: { type: "number", minimum: 1, maximum: 120 },
+      maxActiveBuses: { type: "integer", minimum: 1, maximum: 1000 },
+      snapToRoads: { type: "boolean", default: true },
+      coordinates: {
+        type: "array",
+        minItems: 2,
+        maxItems: 500,
+        items: {
+          type: "object",
+          required: ["lat", "lng"],
+          additionalProperties: false,
+          properties: {
+            lat: { type: "number", minimum: -90, maximum: 90 },
+            lng: { type: "number", minimum: -180, maximum: 180 },
+          },
+        },
+      },
+    },
+  },
+  response: {
+    201: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        route: busRouteSchema,
+        graph: {
+          type: "object",
+          properties: {
+            nodesCreated: { type: "integer" },
+            edgesCreated: { type: "integer" },
+          },
+        },
+        snap: {
+          type: "object",
+          properties: {
+            applied: { type: "boolean" },
+            source: { type: "string" },
+            distanceM: { type: ["number", "null"] },
+            durationSeconds: { type: ["number", "null"] },
+          },
+        },
+      },
+    },
+    400: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    403: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
+export const snapAdminRouteSchema = {
+  tags: ["Admin"],
+  summary: "Snap drawn transit route points to roads",
+  operationId: "snapAdminRoute",
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: "object",
+    required: ["coordinates"],
+    additionalProperties: false,
+    properties: {
+      coordinates: {
+        type: "array",
+        minItems: 2,
+        maxItems: 100,
+        items: {
+          type: "object",
+          required: ["lat", "lng"],
+          additionalProperties: false,
+          properties: {
+            lat: { type: "number", minimum: -90, maximum: 90 },
+            lng: { type: "number", minimum: -180, maximum: 180 },
+          },
+        },
+      },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        coordinates: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              lat: { type: "number" },
+              lng: { type: "number" },
+            },
+          },
+        },
+        distanceM: { type: ["number", "null"] },
+        durationSeconds: { type: ["number", "null"] },
+        source: { type: "string" },
+        fallbackReason: { type: "string" },
+      },
+    },
+    401: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    403: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+    502: {
+      type: "object",
+      properties: {
+        error: { type: "string" },
+      },
+    },
+  },
+};
+
 export const deleteBussesSchema = {
   tags: ["Bus"],
   summary: "Delete all bus routes",

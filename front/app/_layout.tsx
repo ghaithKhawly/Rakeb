@@ -35,7 +35,7 @@ function RootLayoutNav() {
     if (!user && !isPublicRoute) {
       router.replace("/login");
     } else if (user && segments[0] === "login") {
-      router.replace("/(tabs)");
+      router.replace(user.role === "admin" ? ("/admin" as never) : "/(tabs)");
     }
   }, [user, segments, isLoading, router]);
 

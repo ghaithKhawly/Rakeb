@@ -14,6 +14,7 @@ import type {
 } from "../../../../types/navigation";
 import { getEffectiveRoutingConfig } from "./busHandlers";
 import { routeWithFallback } from "./routingHandlers";
+import { requireAdminRole } from "../utils/adminAuth";
 import {
   applyProfileConfig,
   buildAlternativeProfiles,
@@ -501,6 +502,11 @@ export async function invalidateGraphCacheHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
   const query = request.query as InvalidateGraphQuery;
   const rebuild = query.rebuild ?? true;
   const wait = query.wait ?? false;

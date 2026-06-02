@@ -71,8 +71,9 @@ export default function Login() {
       const { token, userId } = registerResponse.data as {
         token: string;
         userId: number;
+        role?: string;
       };
-      await signIn(token, { id: userId, username });
+      await signIn(token, { id: userId, username, role: registerResponse.data.role ?? "rider" });
       Alert.alert("Success", "Account created and logged in");
     } catch (error) {
       const axiosError = error as AxiosError<{ error: string }>;

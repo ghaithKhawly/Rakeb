@@ -16,6 +16,8 @@ import {
   getBusSchema,
   getBussesSchema,
   invalidateGraphSchema,
+  createAdminRouteSchema,
+  snapAdminRouteSchema,
   saveUserTravelHistorySchema,
   setRoutingPreferencesSchema,
   submitBusFeedbackSchema,
@@ -32,6 +34,8 @@ import {
   submitBusFeedbackHandler,
   getBusLiveMetricsHandler,
   getBusFeedbackSummaryHandler,
+  createAdminRouteHandler,
+  snapAdminRouteHandler,
   deleteBusHandler,
   deleteBussesHandler,
   increaseBusPricesHandler,
@@ -186,6 +190,24 @@ export async function busRoutes(fastify: FastifyInstance) {
     async (request, reply) => listBussesHandler(fastify, request),
   );
 
+  fastify.post(
+    "/admin/routes/snap",
+    {
+      preHandler: [fastify.authenticate],
+      schema: snapAdminRouteSchema,
+    },
+    async (request, reply) => snapAdminRouteHandler(fastify, request, reply),
+  );
+
+  fastify.post(
+    "/admin/routes",
+    {
+      preHandler: [fastify.authenticate],
+      schema: createAdminRouteSchema,
+    },
+    async (request, reply) => createAdminRouteHandler(fastify, request, reply),
+  );
+
   fastify.get(
     "/bus",
     {
@@ -228,7 +250,7 @@ export async function busRoutes(fastify: FastifyInstance) {
       preHandler: [fastify.authenticate],
       schema: deleteBusSchema,
     },
-    async (request, reply) => deleteBusHandler(fastify, request),
+    async (request, reply) => deleteBusHandler(fastify, request, reply),
   );
 
   fastify.delete(
@@ -237,7 +259,7 @@ export async function busRoutes(fastify: FastifyInstance) {
       preHandler: [fastify.authenticate],
       schema: deleteBussesSchema,
     },
-    async (request, reply) => deleteBussesHandler(fastify, request),
+    async (request, reply) => deleteBussesHandler(fastify, request, reply),
   );
 
   fastify.post(
@@ -245,7 +267,7 @@ export async function busRoutes(fastify: FastifyInstance) {
     {
       preHandler: [fastify.authenticate],
     },
-    async () => increaseBusPricesHandler(fastify),
+    async (request, reply) => increaseBusPricesHandler(fastify, request, reply),
   );
 }
 

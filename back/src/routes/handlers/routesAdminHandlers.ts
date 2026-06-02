@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { graphCache } from "../../services/graphCache";
 import type {
+  CreateAdminRouteBody,
+  CreateAdminRouteResponse,
   GetBusesQuery,
   GetBusQuery,
   SubmitBusFeedbackBody,
@@ -8,7 +10,166 @@ import type {
   GetBusFeedbackSummaryQuery,
   DeleteBusQuery,
   DeleteBusesQuery,
+  SnapAdminRouteBody,
+  SnapAdminRouteResponse,
 } from "../../../../types/bus";
+import { requireAdminRole } from "../utils/adminAuth";
+
+const MANAGED_TRANSIT_TYPES = ["bus", "microbus"];
+const DEFAULT_DRAWN_ROUTE_SPEED_KMH = 25;
+const DEFAULT_DRAWN_ROUTE_PRICE = 3000;
+const DEFAULT_DRAWN_ROUTE_MAX_ACTIVE_BUSES = 1;
+const DRAWN_ROUTE_ACCESS_GAP_M = 400;
+const MIN_DISTINCT_ROUTE_POINT_DISTANCE_M = 5;
+const ROAD_SNAP_TIMEOUT_MS = 8000;
+const ROAD_SNAP_SOURCE = "osrm";
+
+type DrawCoordinate = {
+  lat: number;
+  lng: number;
+};
+
+type RoadSnapResult = {
+  coordinates: DrawCoordinate[];
+  distanceM: number | null;
+  durationSeconds: number | null;
+  source: string;
+  fallbackReason?: string;
+};
+
+function drawnRoadSnapFallback(coordinates: DrawCoordinate[], fallbackReason?: string): RoadSnapResult {
+  return {
+    coordinates: normalizeDrawnCoordinates(coordinates),
+    distanceM: null,
+    durationSeconds: null,
+    source: "drawn",
+    fallbackReason,
+  };
+}
+
+function haversineDistanceM(a: DrawCoordinate, b: DrawCoordinate): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+function interpolateCoordinate(a: DrawCoordinate, b: DrawCoordinate, ratio: number): DrawCoordinate {
+  return {
+    lat: a.lat + ((b.lat - a.lat) * ratio),
+    lng: a.lng + ((b.lng - a.lng) * ratio),
+  };
+}
+
+function normalizeDrawnCoordinates(coordinates: DrawCoordinate[]): DrawCoordinate[] {
+  const normalized: DrawCoordinate[] = [];
+  for (const coordinate of coordinates) {
+    const last = normalized[normalized.length - 1];
+    if (!last || haversineDistanceM(last, coordinate) >= MIN_DISTINCT_ROUTE_POINT_DISTANCE_M) {
+      normalized.push(coordinate);
+    }
+  }
+  return normalized;
+}
+
+function safeOsrmBaseUrl(): string {
+  return (process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org").replace(/\/+$/, "");
+}
+
+async function snapCoordinatesToRoads(coordinates: DrawCoordinate[]): Promise<RoadSnapResult> {
+  const normalized = normalizeDrawnCoordinates(coordinates);
+  if (normalized.length < 2) {
+    return {
+      coordinates: normalized,
+      distanceM: null,
+      durationSeconds: null,
+      source: "drawn",
+    };
+  }
+
+  const coordinatePath = normalized
+    .map((coordinate) => `${coordinate.lng},${coordinate.lat}`)
+    .join(";");
+  const url = `${safeOsrmBaseUrl()}/route/v1/driving/${coordinatePath}?overview=full&geometries=geojson&steps=false&alternatives=false&generate_hints=false`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ROAD_SNAP_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "jr-routing-admin/1.0",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Road snap failed with HTTP ${response.status}`);
+    }
+
+    const payload = await response.json() as {
+      code?: string;
+      message?: string;
+      routes?: Array<{
+        distance?: number;
+        duration?: number;
+        geometry?: {
+          coordinates?: Array<[number, number]>;
+        };
+      }>;
+    };
+    const route = payload.routes?.[0];
+    const snappedCoordinates = route?.geometry?.coordinates?.map(([lng, lat]) => ({ lat, lng })) ?? [];
+
+    if (payload.code !== "Ok" || !route || snappedCoordinates.length < 2) {
+      throw new Error(payload.message || "Road snap did not return a route.");
+    }
+
+    return {
+      coordinates: snappedCoordinates,
+      distanceM: typeof route.distance === "number" ? route.distance : null,
+      durationSeconds: typeof route.duration === "number" ? route.duration : null,
+      source: ROAD_SNAP_SOURCE,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function densifyCoordinates(coordinates: DrawCoordinate[]): DrawCoordinate[] {
+  const normalized = normalizeDrawnCoordinates(coordinates);
+  if (normalized.length < 2) {
+    return normalized;
+  }
+
+  const densified: DrawCoordinate[] = [normalized[0] as DrawCoordinate];
+  for (let index = 1; index < normalized.length; index += 1) {
+    const from = normalized[index - 1] as DrawCoordinate;
+    const to = normalized[index] as DrawCoordinate;
+    const distanceM = haversineDistanceM(from, to);
+    const segmentCount = Math.max(1, Math.ceil(distanceM / DRAWN_ROUTE_ACCESS_GAP_M));
+
+    for (let step = 1; step <= segmentCount; step += 1) {
+      densified.push(interpolateCoordinate(from, to, step / segmentCount));
+    }
+  }
+
+  return densified;
+}
+
+function lineStringWkt(coordinates: DrawCoordinate[]): string {
+  const points = coordinates.map((coordinate) => `${coordinate.lng} ${coordinate.lat}`);
+  return `LINESTRING(${points.join(", ")})`;
+}
+
+function segmentLineStringWkt(from: DrawCoordinate, to: DrawCoordinate): string {
+  return lineStringWkt([from, to]);
+}
 
 export async function refreshRouteLiveMetrics(
   client: Awaited<ReturnType<FastifyInstance["pg"]["connect"]>>,
@@ -41,7 +202,7 @@ export async function refreshRouteLiveMetrics(
         LEAST(1.0, COALESCE(f.reports_count, 0)::float8 / 20.0) AS confidence
       FROM routes r
       LEFT JOIN feedback_window f ON f.route_id = r.id
-      WHERE r.type = 'bus'
+      WHERE r.type = ANY($2::text[])
         AND ($1::int IS NULL OR r.id = $1::int)
     )
     INSERT INTO route_live_metrics (
@@ -94,7 +255,7 @@ export async function refreshRouteLiveMetrics(
           last_report_at = EXCLUDED.last_report_at,
           updated_at = EXCLUDED.updated_at
     `,
-    params,
+    [...params, MANAGED_TRANSIT_TYPES],
   );
 }
 
@@ -102,8 +263,8 @@ export async function listBussesHandler(fastify: FastifyInstance, request: Fasti
   const query = request.query as GetBusesQuery;
   const client = await fastify.pg.connect();
   try {
-    const whereClauses: string[] = ["type = $1"];
-    const values: Array<string | number> = ["bus"];
+    const whereClauses: string[] = ["type = ANY($1::text[])"];
+    const values: unknown[] = [MANAGED_TRANSIT_TYPES];
 
     if (query.name) {
       values.push(`%${query.name}%`);
@@ -152,10 +313,200 @@ export async function getBusHandler(fastify: FastifyInstance, request: FastifyRe
   const query = request.query as GetBusQuery;
   const client = await fastify.pg.connect();
   try {
-    const res = await client.query("SELECT * FROM routes WHERE type = $1 AND id = $2", ["bus", query.id]);
+    const res = await client.query("SELECT * FROM routes WHERE type = ANY($1::text[]) AND id = $2", [MANAGED_TRANSIT_TYPES, query.id]);
     return { busses: res.rows };
   } finally {
     client.release();
+  }
+}
+
+export async function createAdminRouteHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
+  const body = request.body as CreateAdminRouteBody;
+  const shouldSnapToRoads = body.snapToRoads ?? true;
+  let snapResult: RoadSnapResult | null = null;
+  let routeShape = body.coordinates;
+
+  if (shouldSnapToRoads) {
+    try {
+      snapResult = await snapCoordinatesToRoads(body.coordinates);
+      routeShape = snapResult.coordinates;
+    } catch (error) {
+      request.log.warn({ error }, "Road snapping failed; saving drawn route coordinates.");
+    }
+  }
+
+  const coordinates = densifyCoordinates(routeShape);
+
+  if (coordinates.length < 2) {
+    return reply.code(400).send({ error: "Draw at least two distinct route points." });
+  }
+
+  const avgSpeedKmh = body.avgSpeedKmh ?? DEFAULT_DRAWN_ROUTE_SPEED_KMH;
+  const basePrice = body.basePrice ?? DEFAULT_DRAWN_ROUTE_PRICE;
+  const maxActiveBuses = body.maxActiveBuses ?? DEFAULT_DRAWN_ROUTE_MAX_ACTIVE_BUSES;
+  const client = await fastify.pg.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const routeRes = await client.query(
+      `
+      INSERT INTO routes (
+        name,
+        type,
+        avg_speed_kmh,
+        base_price,
+        frequency_minutes,
+        crowding_tendency,
+        max_active_buses,
+        geom
+      )
+      VALUES ($1, $2, $3, $4, NULL, 'medium', $5, ST_GeomFromText($6, 4326))
+      RETURNING id, name, type, avg_speed_kmh, base_price, frequency_minutes, crowding_tendency, max_active_buses, created_at
+      `,
+      [
+        body.name.trim(),
+        body.transportType,
+        avgSpeedKmh,
+        basePrice,
+        maxActiveBuses,
+        lineStringWkt(coordinates),
+      ],
+    );
+
+    const route = routeRes.rows[0];
+    const nodeIds: number[] = [];
+    for (const coordinate of coordinates) {
+      const nodeRes = await client.query<{ id: number }>(
+        "INSERT INTO nodes (latitude, longitude) VALUES ($1, $2) RETURNING id",
+        [coordinate.lat, coordinate.lng],
+      );
+      nodeIds.push(nodeRes.rows[0].id);
+    }
+
+    for (let index = 0; index < nodeIds.length; index += 1) {
+      await client.query(
+        `
+        INSERT INTO route_nodes (route_id, node_id, sequence_order)
+        VALUES ($1, $2, $3)
+        `,
+        [route.id, nodeIds[index], index],
+      );
+    }
+
+    let edgesCreated = 0;
+    for (let index = 1; index < nodeIds.length; index += 1) {
+      const from = coordinates[index - 1] as DrawCoordinate;
+      const to = coordinates[index] as DrawCoordinate;
+      const distanceM = haversineDistanceM(from, to);
+      if (distanceM <= 0) {
+        continue;
+      }
+
+      const distanceKm = distanceM / 1000;
+      const travelTime = (distanceKm / avgSpeedKmh) * 3600;
+      const geom = segmentLineStringWkt(from, to);
+      const fromNodeId = nodeIds[index - 1];
+      const toNodeId = nodeIds[index];
+
+      const forward = await client.query(
+        `
+        INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
+        VALUES ($1, $2, $3, $4, $5, ST_GeomFromText($6, 4326))
+        ON CONFLICT (from_node, to_node, route_id) DO NOTHING
+        `,
+        [fromNodeId, toNodeId, route.id, travelTime, distanceKm, geom],
+      );
+      edgesCreated += forward.rowCount ?? 0;
+
+      const backward = await client.query(
+        `
+        INSERT INTO edges (from_node, to_node, route_id, travel_time, distance_km, geom)
+        VALUES ($1, $2, $3, $4, $5, ST_GeomFromText($6, 4326))
+        ON CONFLICT (from_node, to_node, route_id) DO NOTHING
+        `,
+        [toNodeId, fromNodeId, route.id, travelTime, distanceKm, geom],
+      );
+      edgesCreated += backward.rowCount ?? 0;
+    }
+
+    await client.query(
+      `
+      INSERT INTO route_driver_availability (route_id, active_driver_count)
+      VALUES ($1, 0)
+      ON CONFLICT (route_id) DO NOTHING
+      `,
+      [route.id],
+    );
+
+    await refreshRouteLiveMetrics(client, route.id);
+    await client.query("COMMIT");
+    graphCache.invalidate();
+
+    return reply.code(201).send({
+      message: "Transit route created successfully",
+      route,
+      graph: {
+        nodesCreated: nodeIds.length,
+        edgesCreated,
+      },
+      snap: {
+        applied: snapResult != null,
+        source: snapResult?.source ?? "drawn",
+        distanceM: snapResult?.distanceM ?? null,
+        durationSeconds: snapResult?.durationSeconds ?? null,
+      },
+    } satisfies CreateAdminRouteResponse);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function snapAdminRouteHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
+  const body = request.body as SnapAdminRouteBody;
+  try {
+    const snapped = await snapCoordinatesToRoads(body.coordinates);
+    return reply.code(200).send({
+      coordinates: snapped.coordinates,
+      distanceM: snapped.distanceM,
+      durationSeconds: snapped.durationSeconds,
+      source: snapped.source,
+      fallbackReason: snapped.fallbackReason,
+    } satisfies SnapAdminRouteResponse);
+  } catch (error) {
+    request.log.warn({ error }, "Road snapping failed; returning drawn route fallback.");
+    const fallback = drawnRoadSnapFallback(
+      body.coordinates,
+      error instanceof Error ? error.message : "Could not snap route to roads.",
+    );
+    return reply.code(200).send({
+      coordinates: fallback.coordinates,
+      distanceM: fallback.distanceM,
+      durationSeconds: fallback.durationSeconds,
+      source: fallback.source,
+      fallbackReason: fallback.fallbackReason,
+    } satisfies SnapAdminRouteResponse);
   }
 }
 
@@ -187,7 +538,10 @@ export async function submitBusFeedbackHandler(
 
   const client = await fastify.pg.connect();
   try {
-    const routeCheck = await client.query("SELECT id FROM routes WHERE id = $1 AND type = $2", [body.routeId, "bus"]);
+    const routeCheck = await client.query(
+      "SELECT id FROM routes WHERE id = $1 AND type = ANY($2::text[])",
+      [body.routeId, MANAGED_TRANSIT_TYPES],
+    );
 
     if (routeCheck.rows.length === 0) {
       return reply.code(404).send({ error: "Bus route not found" });
@@ -288,10 +642,11 @@ export async function getBusLiveMetricsHandler(fastify: FastifyInstance, request
       FROM route_live_metrics m
       JOIN routes r ON r.id = m.route_id
       LEFT JOIN route_driver_availability a ON a.route_id = m.route_id
-      WHERE ($1::int IS NULL OR m.route_id = $1::int)
+      WHERE r.type = ANY($2::text[])
+        AND ($1::int IS NULL OR m.route_id = $1::int)
       ORDER BY m.route_id ASC
       `,
-      params,
+      [...params, MANAGED_TRANSIT_TYPES],
     );
 
     return {
@@ -377,41 +732,68 @@ export async function getBusFeedbackSummaryHandler(fastify: FastifyInstance, req
   }
 }
 
-export async function deleteBusHandler(fastify: FastifyInstance, request: FastifyRequest) {
+export async function deleteBusHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
   const client = await fastify.pg.connect();
   const query = request.query as DeleteBusQuery;
   try {
-    await client.query("DELETE FROM routes WHERE type = $1 AND id = $2", ["bus", query.id]);
+    await client.query("DELETE FROM routes WHERE type = ANY($1::text[]) AND id = $2", [MANAGED_TRANSIT_TYPES, query.id]);
     if (query.invalidateGraph ?? true) {
       graphCache.invalidate();
     }
-    return { message: "Bus deleted successfully" };
+    return { message: "Transit route deleted successfully" };
   } finally {
     client.release();
   }
 }
 
-export async function deleteBussesHandler(fastify: FastifyInstance, request: FastifyRequest) {
+export async function deleteBussesHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
   const client = await fastify.pg.connect();
   const query = request.query as DeleteBusesQuery;
   try {
-    await client.query("DELETE FROM routes WHERE type = $1 ", ["bus"]);
+    await client.query("DELETE FROM routes WHERE type = ANY($1::text[]) ", [MANAGED_TRANSIT_TYPES]);
     if (query.invalidateGraph ?? true) {
       graphCache.invalidate();
     }
-    return { message: "Busses deleted successfully" };
+    return { message: "Transit routes deleted successfully" };
   } finally {
     client.release();
   }
 }
 
-export async function increaseBusPricesHandler(fastify: FastifyInstance) {
+export async function increaseBusPricesHandler(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const adminId = await requireAdminRole(fastify, request, reply);
+  if (adminId == null) {
+    return reply;
+  }
+
   const client = await fastify.pg.connect();
   try {
     await client.query(`UPDATE routes
       SET base_price = base_price * 1.10
-      WHERE type = 'bus' AND base_price IS NOT NULL`);
-    return { message: "Bus prices increased by 10%" };
+      WHERE type = ANY($1::text[]) AND base_price IS NOT NULL`, [MANAGED_TRANSIT_TYPES]);
+    return { message: "Transit route prices increased by 10%" };
   } finally {
     client.release();
   }

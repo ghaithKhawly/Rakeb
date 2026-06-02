@@ -152,7 +152,7 @@ export async function refreshRouteLiveMetrics(
         LEAST(1.0, COALESCE(f.reports_count, 0)::float8 / 20.0) AS confidence
       FROM routes r
       LEFT JOIN feedback_window f ON f.route_id = r.id
-      WHERE r.type = 'bus'
+      WHERE r.type IN ('bus', 'microbus')
         AND ($1::int IS NULL OR r.id = $1::int)
     )
     INSERT INTO route_live_metrics (
@@ -408,7 +408,7 @@ export async function readCurrentAvailability(
       a.updated_at AS availability_updated_at
     FROM routes r
     LEFT JOIN route_driver_availability a ON a.route_id = r.id
-    WHERE r.type = 'bus'
+    WHERE r.type IN ('bus', 'microbus')
       AND ($1::int IS NULL OR r.id = $1::int)
     ORDER BY r.id ASC
   `, params);

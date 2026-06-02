@@ -6,9 +6,12 @@ import { Colors } from "@/constants/theme";
 import { Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLanguage } from "@/hooks/LanguageContext";
+import { useAuth } from "@/hooks/AuthContext";
 
 export default function TabLayout() {
   const { t } = useLanguage();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   return (
     <Tabs
@@ -40,6 +43,16 @@ export default function TabLayout() {
           title: t("tabs.settings"),
           tabBarIcon: ({ color }) => (
             <Ionicons size={24} name="settings" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="admin"
+        options={{
+          href: isAdmin ? undefined : null,
+          title: "Admin",
+          tabBarIcon: ({ color }) => (
+            <Ionicons size={24} name="shield-checkmark" color={color} />
           ),
         }}
       />

@@ -70,7 +70,7 @@ export async function loadRouteMetrics(
     FROM routes r
     LEFT JOIN route_live_metrics m ON m.route_id = r.id
     LEFT JOIN route_driver_availability a ON a.route_id = r.id
-    WHERE r.type = 'bus'
+    WHERE r.type IN ('bus', 'microbus')
       AND ($1::int IS NULL OR r.id = $1::int)
     ORDER BY r.id ASC
   `, params);
@@ -102,7 +102,7 @@ export async function loadRouteAvailability(
       a.updated_at AS availability_updated_at
     FROM routes r
     LEFT JOIN route_driver_availability a ON a.route_id = r.id
-    WHERE r.type = 'bus'
+    WHERE r.type IN ('bus', 'microbus')
       AND ($1::int IS NULL OR r.id = $1::int)
     ORDER BY r.id ASC
   `, params);

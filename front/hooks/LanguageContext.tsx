@@ -5,7 +5,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import * as SecureStore from "expo-secure-store";
+import { getStoredValue, setStoredValue } from "@/utils/storage";
 
 export type AppLanguage = "en" | "ar";
 
@@ -509,7 +509,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const stored = await SecureStore.getItemAsync(STORAGE_KEY);
+        const stored = await getStoredValue(STORAGE_KEY);
         if (stored === "ar" || stored === "en") {
           setLanguageState(stored);
         }
@@ -523,7 +523,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const setLanguage = async (next: AppLanguage) => {
     setLanguageState(next);
-    await SecureStore.setItemAsync(STORAGE_KEY, next);
+    await setStoredValue(STORAGE_KEY, next);
   };
 
   const dictionary = language === "ar" ? ar : en;

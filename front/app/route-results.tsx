@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Kinetic, TransitTheme } from '@/constants/theme';
-import { ThemedText } from '@/components/themed-text';
+import { ThemedText } from '@/components/themed-text'; 
 import { RouteStepsList } from '@/components/home/RouteStepsList';
 import { HintBanner } from '@/components/ui/HintBanner';
 import MapView, { Marker, Polyline } from '@/components/maps/MapViewCompat';

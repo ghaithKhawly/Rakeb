@@ -7,14 +7,19 @@ import React, {
   useEffect,
   ReactNode,
 } from "react";
-import * as SecureStore from "expo-secure-store";
 import { api } from "@/config/api";
 import { useRouter } from "expo-router";
+import {
+  deleteStoredValue,
+  getStoredValue,
+  setStoredValue,
+} from "@/utils/storage";
 
 // Define User type
 interface User {
   id: number;
   username: string;
+  role?: "rider" | "driver" | "admin" | string;
 }
 
 // Define Context type
@@ -66,8 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenRef.current = null;
     setUser(null);
 
-    await SecureStore.deleteItemAsync("auth_token");
-    await SecureStore.deleteItemAsync("auth_user");
+    await deleteStoredValue("auth_token");
+    await deleteStoredValue("auth_user");
     delete api.defaults.headers.common["Authorization"];
   }, []);
 
@@ -75,8 +80,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check for stored token on app launch
     const loadAuthData = async () => {
       try {
-        const storedToken = await SecureStore.getItemAsync("auth_token");
-        const storedUser = await SecureStore.getItemAsync("auth_user");
+        const storedToken = await getStoredValue("auth_token");
+        const storedUser = await getStoredValue("auth_user");
 
         if (storedToken && storedUser) {
           setToken(storedToken);
@@ -138,8 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(newUser);
 
       // Persist data
-      await SecureStore.setItemAsync("auth_token", newToken);
-      await SecureStore.setItemAsync("auth_user", JSON.stringify(newUser));
+      await setStoredValue("auth_token", newToken);
+      await setStoredValue("auth_user", JSON.stringify(newUser));
 
       // Configure axios
       api.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
@@ -152,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      router.replace("/(tabs)");
+      router.replace(newUser.role === "admin" ? ("/admin" as never) : "/(tabs)");
     } catch (error) {
       console.error("Sign in error", error);
     }

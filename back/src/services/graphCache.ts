@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -256,8 +255,7 @@ class GraphCacheService {
 
     try {
       const routesResult = await client.query<RouteRow>(
-        "SELECT id, name, type, avg_speed_kmh, base_price, frequency_minutes, crowding_tendency FROM routes WHERE type = $1 ORDER BY id",
-        ["bus"],
+        "SELECT id, name, type, avg_speed_kmh, base_price, frequency_minutes, crowding_tendency FROM routes WHERE type IN ('bus', 'microbus') ORDER BY id",
       );
       const nodesResult = await client.query<NodeRow>(
         "SELECT id, latitude, longitude FROM nodes ORDER BY id",
@@ -269,7 +267,12 @@ class GraphCacheService {
         "SELECT route_id, node_id, sequence_order FROM route_nodes ORDER BY route_id, sequence_order",
       );
 
-      const graphVersion = await this.computeGraphVersion();
+      const graphVersion = this.computeGraphVersion(
+        routesResult.rows,
+        nodesResult.rows,
+        edgesResult.rows,
+        routeNodesResult.rows,
+      );
 
       return {
         routes: routesResult.rows,
@@ -284,31 +287,15 @@ class GraphCacheService {
     }
   }
 
-  private async computeGraphVersion(): Promise<string | null> {
-    const kmzPaths = (process.env.GRAPH_KMZ_FILES
-      ?? path.resolve(process.cwd(), "../script/busses.kmz"))
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
-
-    if (kmzPaths.length === 0) {
-      return null;
-    }
-
+  private computeGraphVersion(
+    routes: RouteRow[],
+    nodes: NodeRow[],
+    edges: EdgeRow[],
+    routeNodes: RouteNodeRow[],
+  ): string {
     const hasher = createHash("sha256");
-    let hashedAny = false;
-
-    for (const kmzPath of kmzPaths) {
-      if (!existsSync(kmzPath)) {
-        continue;
-      }
-      const content = await readFile(kmzPath);
-      hasher.update(kmzPath);
-      hasher.update(content);
-      hashedAny = true;
-    }
-
-    return hashedAny ? hasher.digest("hex") : null;
+    hasher.update(JSON.stringify({ routes, nodes, edges, routeNodes }));
+    return hasher.digest("hex");
   }
 }
 

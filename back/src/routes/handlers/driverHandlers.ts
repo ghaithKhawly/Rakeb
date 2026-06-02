@@ -42,8 +42,8 @@ export async function checkInDriverHandler(
     }
 
     const routeRes = await client.query<{ id: number; max_active_buses: number }>(
-      "SELECT id, max_active_buses FROM routes WHERE id = $1 AND type = $2",
-      [body.routeId, "bus"],
+      "SELECT id, max_active_buses FROM routes WHERE id = $1 AND type IN ('bus', 'microbus')",
+      [body.routeId],
     );
 
     if (routeRes.rows.length === 0) {
