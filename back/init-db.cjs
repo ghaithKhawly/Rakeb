@@ -1,10 +1,22 @@
+require("dotenv").config();
+
 const { Client } = require("pg");
 
+// Admin connection to the default 'postgres' database, used only to CREATE the
+// app database. Read from the environment — never hardcode the password here,
+// this file is committed.
+const adminUrl = process.env.PG_ADMIN_URL;
+
+if (!adminUrl) {
+  console.error(
+    "PG_ADMIN_URL is not set. Copy back/.env.example to back/.env and fill it in,\n" +
+      "e.g. PG_ADMIN_URL=postgres://postgres:YOUR_PASSWORD@localhost:5432/postgres",
+  );
+  process.exit(1);
+}
+
 async function createDatabase() {
-  // Connect to the default 'postgres' database to create the new one
-  const client = new Client({
-    connectionString: "postgres://postgres:44241155@localhost:5432/postgres",
-  });
+  const client = new Client({ connectionString: adminUrl });
 
   try {
     await client.connect();
