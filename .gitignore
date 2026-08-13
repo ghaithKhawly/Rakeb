@@ -1,0 +1,41 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+
+# --- dependencies ---
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# --- build output ---
+dist/
+build/
+*.tsbuildinfo
+
+# --- expo / rn ---
+.expo/
+.expo-shared/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# --- tooling / local state ---
+.claude/
+.kiro/
+copilot_exports/
+~/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- logs ---
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
